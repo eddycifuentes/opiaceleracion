@@ -1,0 +1,685 @@
+<!--
+  ============================================================
+  PANTALLA DE INICIO / LANDING DE ACCESOS RÁPIDOS
+  ============================================================
+  Módulo nuevo, totalmente autocontenido y desacoplado del resto
+  del sistema. Persistencia local (localStorage) para no tocar
+  Google Sheets ni el backend. Toda la lógica se encapsula en
+  el namespace global `window.Inicio` para evitar colisiones con
+  variables existentes (`estado`, `cambiarVista`, etc.).
+
+  Reutiliza funciones globales ya disponibles del proyecto:
+    - mostrarToast(tipo, mensaje)
+    - escapeHtml(str)
+    - cerrarModal(id)
+  Pero TODAS las funciones nuevas viven dentro de `Inicio.*`.
+-->
+
+<style>
+  /* =================================================================
+     Anti-flash: durante el arranque ocultamos las vistas hasta que el
+     módulo Inicio haya redirigido a 'vista-inicio'.
+     ================================================================= */
+  body:not(.inicio-boot-listo) .vista { visibility: hidden; }
+
+  /* =================================================================
+     Estilos del módulo "Inicio" — rediseño v2 (violeta Hostinger).
+     Mismos selectores/clases que usa el render del módulo.
+     ================================================================= */
+  #vista-inicio .acceso-hero {
+    background: var(--grad-brand);
+    border-radius: var(--r-xl);
+    padding: 38px 40px;
+    color: #fff;
+    box-shadow: 0 24px 56px rgba(47, 28, 106, 0.32);
+    margin-bottom: 28px;
+    position: relative;
+    overflow: hidden;
+  }
+  #vista-inicio .acceso-hero::after {
+    content: ""; position: absolute; right: -50px; top: -70px;
+    width: 280px; height: 280px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,255,255,0.14), transparent 70%);
+  }
+  #vista-inicio .acceso-hero h2 {
+    font-size: 1.85rem; font-weight: 700; margin: 0 0 10px;
+    display: flex; align-items: center; gap: 14px; letter-spacing: -0.03em;
+  }
+  #vista-inicio .acceso-hero-ic {
+    width: 50px; height: 50px; border-radius: 15px;
+    background: rgba(255,255,255,0.16); display: grid; place-items: center; font-size: 1.4rem;
+  }
+  #vista-inicio .acceso-hero p { font-size: 1rem; opacity: 0.9; margin: 0; max-width: 580px; line-height: 1.5; }
+
+  #vista-inicio .acceso-toolbar {
+    display: flex; gap: 11px; flex-wrap: wrap; align-items: center; margin-bottom: 20px;
+  }
+  #vista-inicio .acceso-toolbar input[type="text"] { flex: 1; min-width: 240px; }
+
+  #vista-inicio .acceso-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(225px, 1fr));
+    gap: 18px; align-items: stretch;
+  }
+
+  #vista-inicio .acceso-card {
+    position: relative; background: var(--surface);
+    border-radius: var(--r-lg); padding: 22px;
+    box-shadow: var(--shadow-sm); border: 1px solid var(--border);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    cursor: pointer; display: flex; flex-direction: column; gap: 12px; overflow: hidden;
+  }
+  #vista-inicio .acceso-card::before {
+    content: ""; position: absolute; top: 0; left: 0; right: 0;
+    height: 4px; background: var(--acceso-color, #673de6);
+  }
+  #vista-inicio .acceso-card:hover {
+    transform: translateY(-5px); box-shadow: var(--shadow-md);
+    border-color: color-mix(in srgb, var(--acceso-color, #673de6) 40%, var(--border));
+  }
+
+  #vista-inicio .acceso-card-icon {
+    width: 50px; height: 50px; border-radius: 15px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: color-mix(in srgb, var(--acceso-color, #673de6) 13%, white);
+    color: var(--acceso-color, #673de6); font-size: 1.45rem;
+  }
+  @supports not (background: color-mix(in srgb, red, blue)) {
+    #vista-inicio .acceso-card-icon { background: #f4f1fe; }
+  }
+
+  #vista-inicio .acceso-card-title {
+    font-weight: 700; color: var(--text); font-size: 1rem; line-height: 1.3;
+    word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical; overflow: hidden;
+  }
+  #vista-inicio .acceso-card-desc {
+    font-size: 0.84rem; color: var(--muted); line-height: 1.5; flex: 1;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  #vista-inicio .acceso-card-cat {
+    display: inline-block; align-self: flex-start;
+    font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;
+    color: var(--acceso-color, #673de6);
+    background: color-mix(in srgb, var(--acceso-color, #673de6) 12%, white);
+    padding: 4px 11px; border-radius: 999px;
+  }
+  @supports not (background: color-mix(in srgb, red, blue)) {
+    #vista-inicio .acceso-card-cat { background: #f4f1fe; }
+  }
+
+  #vista-inicio .acceso-card-actions { position: absolute; top: 13px; right: 13px; display: none; gap: 6px; }
+  #vista-inicio .acceso-card:hover .acceso-card-actions { display: flex; }
+  #vista-inicio .acceso-card-actions button {
+    background: #fff; border: 1px solid var(--border); border-radius: 10px;
+    width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center;
+    color: var(--text-soft); font-size: 0.84rem; cursor: pointer; transition: all 0.15s;
+    box-shadow: var(--shadow-xs);
+  }
+  #vista-inicio .acceso-card-actions button:hover { color: var(--text); }
+  #vista-inicio .acceso-card-actions button.danger:hover { background: var(--danger-bg); color: var(--danger); border-color: #f7c9d8; }
+
+  #vista-inicio .acceso-empty {
+    grid-column: 1 / -1; text-align: center; padding: 56px 20px; color: var(--muted);
+    background: var(--surface); border: 2px dashed var(--border); border-radius: var(--r-lg);
+  }
+  #vista-inicio .acceso-empty i { font-size: 2.6rem; display: block; margin-bottom: 12px; color: #cdc8de; }
+
+  #vista-inicio .acceso-categoria-filtro {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 8px 16px; border-radius: 999px; font-size: 0.82rem; font-weight: 600;
+    background: var(--surface); color: var(--text-soft);
+    cursor: pointer; border: 1px solid var(--border); transition: all 0.15s;
+  }
+  #vista-inicio .acceso-categoria-filtro:hover { border-color: var(--brand-100); color: var(--brand-600); }
+  #vista-inicio .acceso-categoria-filtro.activo {
+    background: var(--brand-600); color: white; border-color: var(--brand-600);
+    box-shadow: 0 6px 16px rgba(103,61,230,0.3);
+  }
+
+  /* Selector visual de color en el modal */
+  #modalAccesoInicio .acceso-color-opciones { display: flex; gap: 10px; flex-wrap: wrap; }
+  #modalAccesoInicio .acceso-color-opcion {
+    width: 32px; height: 32px; border-radius: 50%; cursor: pointer;
+    border: 3px solid transparent; transition: transform 0.15s;
+  }
+  #modalAccesoInicio .acceso-color-opcion:hover { transform: scale(1.12); }
+  #modalAccesoInicio .acceso-color-opcion.seleccionado { border-color: var(--text); transform: scale(1.12); }
+</style>
+
+<!-- ============================================================
+     Modal para crear / editar un acceso rápido
+     ============================================================ -->
+<div id="modalAccesoInicio" class="hidden modal-overlay">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="tituloModalAccesoInicio"><span class="mh-ic"><i class="bi bi-bookmark-plus"></i></span> Nuevo acceso rápido</h3>
+      <button type="button" onclick="Inicio.cerrarModalAcceso()" class="modal-close">&times;</button>
+    </div>
+    <form id="formAccesoInicio" onsubmit="Inicio.guardarAcceso(event)" style="display:contents">
+      <div class="modal-body">
+        <input type="hidden" id="acceso_id">
+
+        <div>
+          <label class="label">Título *</label>
+          <input type="text" id="acceso_titulo" required maxlength="60" class="input" placeholder="Ej: Drive de Iniciativas">
+        </div>
+
+        <div>
+          <label class="label">URL *</label>
+          <input type="url" id="acceso_url" required class="input" placeholder="https://...">
+          <p class="hint">Debe iniciar con http:// o https://</p>
+        </div>
+
+        <div>
+          <label class="label">Descripción</label>
+          <textarea id="acceso_descripcion" rows="2" maxlength="160" class="textarea" placeholder="Notas breves (opcional)"></textarea>
+        </div>
+
+        <div class="form-row">
+          <div>
+            <label class="label">Categoría</label>
+            <select id="acceso_categoria" class="select">
+              <option>Archivo</option>
+              <option>Formulario</option>
+              <option>Herramienta</option>
+              <option>Dashboard</option>
+              <option>Enlace</option>
+              <option>Recurso interno</option>
+            </select>
+          </div>
+          <div>
+            <label class="label">Ícono</label>
+            <select id="acceso_icono" class="select">
+              <option value="bi-link-45deg">Enlace</option>
+              <option value="bi-file-earmark-text">Documento</option>
+              <option value="bi-google">Google</option>
+              <option value="bi-folder">Carpeta</option>
+              <option value="bi-clipboard-data">Formulario</option>
+              <option value="bi-bar-chart">Dashboard</option>
+              <option value="bi-tools">Herramienta</option>
+              <option value="bi-book">Documentación</option>
+              <option value="bi-cloud">Nube</option>
+              <option value="bi-star">Favorito</option>
+              <option value="bi-chat-dots">Comunicación</option>
+              <option value="bi-calendar-event">Calendario</option>
+              <option value="bi-envelope">Correo</option>
+              <option value="bi-people">Equipo</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="label">Color</label>
+          <div class="acceso-color-opciones" id="acceso_color_opciones">
+            <!-- Generado dinámicamente desde Inicio.COLORES -->
+          </div>
+          <input type="hidden" id="acceso_color" value="#673de6">
+        </div>
+      </div>
+
+      <div class="modal-foot">
+        <button type="button" onclick="Inicio.cerrarModalAcceso()" class="btn btn-ghost">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Guardar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ============================================================
+     Lógica del módulo (encapsulada en window.Inicio)
+     ============================================================ -->
+<script>
+(function () {
+  'use strict';
+
+  // ---- Constantes del módulo ------------------------------------
+  var STORAGE_KEY = 'acceso_rapido_inicio_v1';
+
+  var COLORES = [
+    '#673de6', // violeta (marca)
+    '#9333ea', // púrpura
+    '#ec4899', // pink
+    '#e5396b', // rosa-rojo
+    '#e8930c', // amber
+    '#0fb37d', // emerald
+    '#4f7bf0', // blue
+    '#14b8a6', // teal
+    '#6b7280'  // gray
+  ];
+
+  // Accesos por defecto (semilla) la primera vez que se abre la app.
+  // Se pueden editar/eliminar desde la UI sin tocar código.
+  var ACCESOS_INICIALES = [
+    {
+      id: 'seed-1',
+      titulo: 'Hoja de cálculo del sistema',
+      descripcion: 'Base de datos principal de proyectos y tareas',
+      url: 'https://docs.google.com/spreadsheets/d/10QQpYyy-amTzU-3AqvOMZZmUBZtByEPSGUq4y2ddWs0',
+      categoria: 'Archivo',
+      icono: 'bi-file-earmark-spreadsheet',
+      color: '#10b981'
+    },
+    {
+      id: 'seed-2',
+      titulo: 'Google Drive',
+      descripcion: 'Repositorio compartido de la VP de Innovación',
+      url: 'https://drive.google.com',
+      categoria: 'Recurso interno',
+      icono: 'bi-folder',
+      color: '#3b82f6'
+    },
+    {
+      id: 'seed-3',
+      titulo: 'Calendario',
+      descripcion: 'Agenda de reuniones y comités de innovación',
+      url: 'https://calendar.google.com',
+      categoria: 'Herramienta',
+      icono: 'bi-calendar-event',
+      color: '#f59e0b'
+    }
+  ];
+
+  // ---- Estado del módulo (separado del `estado` global) ---------
+  var moduloEstado = {
+    accesos: [],
+    filtroCategoria: '',
+    filtroBusqueda: '',
+    modoEdicion: null,   // id del acceso en edición, o null
+    inicializado: false
+  };
+
+  // ---- Persistencia (localStorage) ------------------------------
+  function cargarDesdeStorage() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) {
+        moduloEstado.accesos = ACCESOS_INICIALES.slice();
+        guardarEnStorage();
+        return;
+      }
+      var parsed = JSON.parse(raw);
+      moduloEstado.accesos = Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      console.warn('[Inicio] No se pudo leer localStorage:', e);
+      moduloEstado.accesos = ACCESOS_INICIALES.slice();
+    }
+  }
+
+  function guardarEnStorage() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(moduloEstado.accesos));
+    } catch (e) {
+      console.warn('[Inicio] No se pudo escribir en localStorage:', e);
+      if (typeof mostrarToast === 'function') {
+        mostrarToast('error', 'No se pudo guardar localmente el acceso.');
+      }
+    }
+  }
+
+  // ---- Utilidades de escape (fallback si escapeHtml no existe) --
+  function safe(str) {
+    if (typeof escapeHtml === 'function') return escapeHtml(str);
+    if (str === null || str === undefined) return '';
+    var div = document.createElement('div');
+    div.textContent = String(str);
+    return div.innerHTML;
+  }
+
+  function validarUrl(url) {
+    return /^https?:\/\/.+/i.test(String(url || '').trim());
+  }
+
+  function generarId() {
+    return 'acc-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+  }
+
+  // ---- Inicialización (solo se llama al entrar a la vista) ------
+  function inicializar() {
+    if (moduloEstado.inicializado) {
+      render();
+      return;
+    }
+    cargarDesdeStorage();
+    renderSelectorColores();
+    render();
+    moduloEstado.inicializado = true;
+  }
+
+  function renderSelectorColores() {
+    var cont = document.getElementById('acceso_color_opciones');
+    if (!cont) return;
+    cont.innerHTML = COLORES.map(function (c) {
+      return '<div class="acceso-color-opcion" data-color="' + c +
+             '" style="background:' + c + '" onclick="Inicio.seleccionarColor(\'' + c + '\')"></div>';
+    }).join('');
+  }
+
+  function seleccionarColor(color) {
+    document.getElementById('acceso_color').value = color;
+    document.querySelectorAll('#acceso_color_opciones .acceso-color-opcion').forEach(function (el) {
+      el.classList.toggle('seleccionado', el.dataset.color === color);
+    });
+  }
+
+  // ---- Render principal -----------------------------------------
+  function render() {
+    renderCategorias();
+    renderGrid();
+  }
+
+  function renderCategorias() {
+    var cont = document.getElementById('acceso-categorias-cont');
+    if (!cont) return;
+
+    var categorias = Array.from(new Set(moduloEstado.accesos.map(function (a) {
+      return a.categoria || 'Enlace';
+    }))).sort();
+
+    var chips = ['<span class="acceso-categoria-filtro' +
+                 (moduloEstado.filtroCategoria === '' ? ' activo' : '') +
+                 '" onclick="Inicio.filtrarPorCategoria(\'\')">' +
+                 '<i class="bi bi-grid"></i> Todas (' + moduloEstado.accesos.length + ')</span>'];
+
+    categorias.forEach(function (cat) {
+      var count = moduloEstado.accesos.filter(function (a) { return (a.categoria || 'Enlace') === cat; }).length;
+      chips.push('<span class="acceso-categoria-filtro' +
+                 (moduloEstado.filtroCategoria === cat ? ' activo' : '') +
+                 '" onclick="Inicio.filtrarPorCategoria(\'' + safe(cat).replace(/'/g, "\\'") + '\')">' +
+                 safe(cat) + ' (' + count + ')</span>');
+    });
+
+    cont.innerHTML = chips.join('');
+  }
+
+  function renderGrid() {
+    var grid = document.getElementById('acceso-grid');
+    if (!grid) return;
+
+    var q = (moduloEstado.filtroBusqueda || '').toLowerCase().trim();
+    var cat = moduloEstado.filtroCategoria;
+
+    var lista = moduloEstado.accesos.filter(function (a) {
+      if (cat && (a.categoria || 'Enlace') !== cat) return false;
+      if (q) {
+        var hay = [a.titulo, a.descripcion, a.url, a.categoria].join(' ').toLowerCase();
+        if (hay.indexOf(q) === -1) return false;
+      }
+      return true;
+    });
+
+    if (moduloEstado.accesos.length === 0) {
+      grid.innerHTML =
+        '<div class="acceso-empty">' +
+          '<i class="bi bi-bookmark-plus"></i>' +
+          '<p class="font-semibold text-gray-600">Aún no tienes accesos rápidos</p>' +
+          '<p class="text-sm mt-1">Haz clic en <strong>"Nuevo acceso"</strong> para agregar el primero.</p>' +
+        '</div>';
+      return;
+    }
+
+    if (lista.length === 0) {
+      grid.innerHTML =
+        '<div class="acceso-empty">' +
+          '<i class="bi bi-search"></i>' +
+          '<p>No hay accesos que coincidan con la búsqueda.</p>' +
+        '</div>';
+      return;
+    }
+
+    grid.innerHTML = lista.map(function (a) {
+      var color = a.color || '#673de6';
+      var icono = a.icono || 'bi-link-45deg';
+      return '' +
+        '<div class="acceso-card" style="--acceso-color:' + color + '" onclick="Inicio.abrirAcceso(\'' + a.id + '\')">' +
+          '<div class="acceso-card-actions" onclick="event.stopPropagation()">' +
+            '<button title="Editar" onclick="Inicio.abrirModalAcceso(\'' + a.id + '\')"><i class="bi bi-pencil"></i></button>' +
+            '<button class="danger" title="Eliminar" onclick="Inicio.eliminarAcceso(\'' + a.id + '\')"><i class="bi bi-trash"></i></button>' +
+          '</div>' +
+          '<div class="acceso-card-icon"><i class="bi ' + safe(icono) + '"></i></div>' +
+          '<div class="acceso-card-title">' + safe(a.titulo) + '</div>' +
+          (a.descripcion ? '<div class="acceso-card-desc">' + safe(a.descripcion) + '</div>' : '') +
+          '<span class="acceso-card-cat">' + safe(a.categoria || 'Enlace') + '</span>' +
+        '</div>';
+    }).join('');
+  }
+
+  // ---- Acciones --------------------------------------------------
+  function abrirAcceso(id) {
+    var a = moduloEstado.accesos.find(function (x) { return x.id === id; });
+    if (!a || !a.url) return;
+    window.open(a.url, '_blank', 'noopener,noreferrer');
+  }
+
+  function abrirModalAcceso(id) {
+    var modal = document.getElementById('modalAccesoInicio');
+    var titulo = document.getElementById('tituloModalAccesoInicio');
+    var form = document.getElementById('formAccesoInicio');
+
+    form.reset();
+
+    if (id) {
+      var a = moduloEstado.accesos.find(function (x) { return x.id === id; });
+      if (!a) return;
+      moduloEstado.modoEdicion = id;
+      titulo.textContent = 'Editar acceso rápido';
+      document.getElementById('acceso_id').value = a.id;
+      document.getElementById('acceso_titulo').value = a.titulo || '';
+      document.getElementById('acceso_url').value = a.url || '';
+      document.getElementById('acceso_descripcion').value = a.descripcion || '';
+      document.getElementById('acceso_categoria').value = a.categoria || 'Enlace';
+      document.getElementById('acceso_icono').value = a.icono || 'bi-link-45deg';
+      seleccionarColor(a.color || COLORES[0]);
+    } else {
+      moduloEstado.modoEdicion = null;
+      titulo.textContent = 'Nuevo acceso rápido';
+      document.getElementById('acceso_id').value = '';
+      seleccionarColor(COLORES[0]);
+    }
+
+    modal.classList.remove('hidden');
+    setTimeout(function () {
+      var input = document.getElementById('acceso_titulo');
+      if (input) input.focus();
+    }, 100);
+  }
+
+  function cerrarModalAcceso() {
+    var modal = document.getElementById('modalAccesoInicio');
+    if (modal) modal.classList.add('hidden');
+    moduloEstado.modoEdicion = null;
+  }
+
+  function guardarAcceso(event) {
+    event.preventDefault();
+
+    var titulo = document.getElementById('acceso_titulo').value.trim();
+    var url = document.getElementById('acceso_url').value.trim();
+
+    if (!titulo || titulo.length < 2) {
+      if (typeof mostrarToast === 'function') mostrarToast('error', 'El título debe tener al menos 2 caracteres.');
+      return;
+    }
+    if (!validarUrl(url)) {
+      if (typeof mostrarToast === 'function') mostrarToast('error', 'La URL debe iniciar con http:// o https://');
+      return;
+    }
+
+    var datos = {
+      titulo: titulo,
+      url: url,
+      descripcion: document.getElementById('acceso_descripcion').value.trim(),
+      categoria: document.getElementById('acceso_categoria').value,
+      icono: document.getElementById('acceso_icono').value,
+      color: document.getElementById('acceso_color').value || COLORES[0]
+    };
+
+    if (moduloEstado.modoEdicion) {
+      var idx = moduloEstado.accesos.findIndex(function (x) { return x.id === moduloEstado.modoEdicion; });
+      if (idx >= 0) {
+        moduloEstado.accesos[idx] = Object.assign({}, moduloEstado.accesos[idx], datos);
+        if (typeof mostrarToast === 'function') mostrarToast('success', 'Acceso actualizado.');
+      }
+    } else {
+      datos.id = generarId();
+      moduloEstado.accesos.unshift(datos);
+      if (typeof mostrarToast === 'function') mostrarToast('success', 'Acceso agregado.');
+    }
+
+    guardarEnStorage();
+    cerrarModalAcceso();
+    render();
+  }
+
+  function eliminarAcceso(id) {
+    var a = moduloEstado.accesos.find(function (x) { return x.id === id; });
+    if (!a) return;
+    if (!confirm('¿Eliminar el acceso "' + a.titulo + '"?')) return;
+
+    moduloEstado.accesos = moduloEstado.accesos.filter(function (x) { return x.id !== id; });
+    guardarEnStorage();
+    if (typeof mostrarToast === 'function') mostrarToast('success', 'Acceso eliminado.');
+    render();
+  }
+
+  function filtrarPorCategoria(cat) {
+    moduloEstado.filtroCategoria = cat || '';
+    render();
+  }
+
+  function buscar(valor) {
+    moduloEstado.filtroBusqueda = valor || '';
+    renderGrid();
+  }
+
+  function exportarAccesos() {
+    try {
+      var blob = new Blob([JSON.stringify(moduloEstado.accesos, null, 2)], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'accesos-rapidos-' + new Date().toISOString().slice(0, 10) + '.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      if (typeof mostrarToast === 'function') mostrarToast('success', 'Accesos exportados.');
+    } catch (e) {
+      if (typeof mostrarToast === 'function') mostrarToast('error', 'No se pudo exportar.');
+    }
+  }
+
+  function importarAccesos(input) {
+    var file = input.files && input.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      try {
+        var data = JSON.parse(e.target.result);
+        if (!Array.isArray(data)) throw new Error('Formato inválido');
+        // Validación mínima por elemento
+        var validos = data.filter(function (a) {
+          return a && typeof a.titulo === 'string' && typeof a.url === 'string';
+        }).map(function (a) {
+          if (!a.id) a.id = generarId();
+          return a;
+        });
+        moduloEstado.accesos = validos.concat(moduloEstado.accesos.filter(function (existing) {
+          return !validos.some(function (nuevo) { return nuevo.id === existing.id; });
+        }));
+        guardarEnStorage();
+        render();
+        if (typeof mostrarToast === 'function') {
+          mostrarToast('success', 'Se importaron ' + validos.length + ' accesos.');
+        }
+      } catch (err) {
+        if (typeof mostrarToast === 'function') mostrarToast('error', 'Archivo no válido.');
+      } finally {
+        input.value = '';
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  // ---- API pública del módulo -----------------------------------
+  window.Inicio = {
+    inicializar: inicializar,
+    abrirAcceso: abrirAcceso,
+    abrirModalAcceso: abrirModalAcceso,
+    cerrarModalAcceso: cerrarModalAcceso,
+    guardarAcceso: guardarAcceso,
+    eliminarAcceso: eliminarAcceso,
+    filtrarPorCategoria: filtrarPorCategoria,
+    buscar: buscar,
+    seleccionarColor: seleccionarColor,
+    exportarAccesos: exportarAccesos,
+    importarAccesos: importarAccesos
+  };
+
+  // ---- Hook de navegación: parchear cambiarVista sin romperla ---
+  // Envolvemos la función original sin reemplazarla. Además:
+  //   1. Si la vista activa pasa a 'inicio', inicializamos el módulo.
+  //   2. En el PRIMER llamado del bootstrap original (que va a
+  //      'dashboard' por defecto), redirigimos a 'inicio' una sola
+  //      vez para que el usuario aterrice en la pantalla de inicio.
+  //
+  // Esto se hace SIN tocar 7_JavaScript.html ni el estado global
+  // del proyecto. La redirección se ejecuta sólo en la primera
+  // llamada; después el usuario navega libremente.
+  var primeraNavegacionAtendida = false;
+
+  function instalarHookCambiarVista() {
+    if (typeof window.cambiarVista !== 'function') {
+      // Reintentar cuando el DOM esté listo (por si este script
+      // se ejecuta antes que el principal en algún entorno).
+      setTimeout(instalarHookCambiarVista, 50);
+      return;
+    }
+    if (window.cambiarVista.__inicioHook) return; // ya instalado
+
+    var original = window.cambiarVista;
+    var envoltura = function (vista) {
+      // Caso especial: primera vez que el bootstrap llama a
+      // cambiarVista. El bootstrap original irá a 'dashboard';
+      // lo interceptamos y redirigimos a 'inicio' una sola vez.
+      if (!primeraNavegacionAtendida) {
+        primeraNavegacionAtendida = true;
+        if (vista !== 'inicio') {
+          // Llamamos a la original con 'inicio' en lugar de la vista
+          // solicitada (sólo en este primer arranque).
+          var resultadoInicio = original.call(this, 'inicio');
+          try { inicializar(); } catch (e) { console.warn('[Inicio] Error al inicializar:', e); }
+          document.body.classList.add('inicio-boot-listo');
+          return resultadoInicio;
+        }
+        document.body.classList.add('inicio-boot-listo');
+      }
+
+      // Comportamiento normal a partir de aquí: respeta la vista pedida.
+      var resultado = original.apply(this, arguments);
+      if (vista === 'inicio') {
+        try { inicializar(); } catch (e) { console.warn('[Inicio] Error al inicializar:', e); }
+      }
+      return resultado;
+    };
+    envoltura.__inicioHook = true;
+    window.cambiarVista = envoltura;
+  }
+
+  // Instalar el hook tan pronto como sea posible
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', instalarHookCambiarVista);
+  } else {
+    instalarHookCambiarVista();
+  }
+
+  // Salvavidas: si por algún motivo el bootstrap nunca llamara a
+  // cambiarVista (p. ej. error de red prolongado), liberamos el
+  // anti-flash a los 8 s para no dejar la UI en blanco.
+  setTimeout(function () {
+    if (!document.body.classList.contains('inicio-boot-listo')) {
+      document.body.classList.add('inicio-boot-listo');
+    }
+  }, 8000);
+})();
+</script>

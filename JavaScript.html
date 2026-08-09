@@ -1,0 +1,2370 @@
+<script>
+  // ============================================================
+  // ESTADO GLOBAL DEL CLIENTE
+  // ============================================================
+  let estado = {
+    proyectos: [],
+    proyectosFiltrados: [],
+    tareas: [],
+    sprints: [],            // ← NUEVO: sprints cargados del servidor
+    estadisticas: null,
+    vistaActual: 'dashboard',
+    esAdmin: false,         // ← NUEVO: rol del usuario autenticado
+    charts: { proyectos: null, tareas: null, empresas: null, tareasEstado: null },
+    dashboardFiltro: { tipo: null, valor: null },
+    filtrosProyectos: {
+      busqueda: '',
+      estado: '',
+      empresa: '',
+      lider: '',
+      situacion: ''
+    }
+  };
+
+  // ============================================================
+  // INICIALIZACIÓN
+  // ============================================================
+  document.addEventListener('DOMContentLoaded', () => {
+    cargarTodo();
+  });
+
+  /**
+   * Punto de entrada principal.
+   *
+   * CAMBIO REQ 3:
+   *   La primera llamada usa obtenerEstadisticasGlobales() (nueva función
+   *   del servidor) para que el Dashboard muestre métricas de TODOS los
+   *   proyectos, independientemente del usuario autenticado.
+   *
+   *   Las llamadas siguientes (cargarProyectos, cargarTareas) usan las
+   *   versiones filtradas por usuario para Iniciativas, Tareas y Reportes.
+   */
+  function cargarTodo() {
+    mostrarLoader(true);
+    // Cargar rol de admin en paralelo
+    google.script.run
+      .withSuccessHandler(esAdmin => { estado.esAdmin = !!esAdmin; })
+      .withFailureHandler(() => { estado.esAdmin = false; })
+      .esAdministrador();
+
+    google.script.run
+      .withSuccessHandler(stats => {
+        estado.estadisticas = stats;
+        cargarProyectos();
+      })
+      .withFailureHandler(manejarError)
+      .obtenerEstadisticasGlobales();
+  }
+
+  function cargarProyectos() {
+    google.script.run
+      .withSuccessHandler(data => {
+        estado.proyectos = data;
+        cargarTareas();
+      })
+      .withFailureHandler(manejarError)
+      .obtenerProyectosConAnalisis();
+  }
+
+  function cargarTareas() {
+    google.script.run
+      .withSuccessHandler(data => {
+        estado.tareas = data;
+        cargarSprints();
+      })
+      .withFailureHandler(manejarError)
+      .obtenerTareas();
+  }
+
+  function cargarSprints() {
+    google.script.run
+      .withSuccessHandler(data => {
+        estado.sprints = data || [];
+        renderizarTodo();
+        mostrarLoader(false);
+        if (!estado._paramsURLAplicados) {
+          estado._paramsURLAplicados = true;
+          aplicarParametrosURL();
+        }
+      })
+      .withFailureHandler(err => {
+        // Si falla la carga de sprints, continuar sin sprints
+        estado.sprints = [];
+        renderizarTodo();
+        mostrarLoader(false);
+        if (!estado._paramsURLAplicados) {
+          estado._paramsURLAplicados = true;
+          aplicarParametrosURL();
+        }
+      })
+      .obtenerSprints(''); // sin filtro de proyecto → todos
+  }
+
+  // ============================================================
+  // HELPERS: COMENTARIOS Y SPRINT VIGENTE
+  // ============================================================
+
+  /**
+   * Extrae el comentario más reciente del campo Comentarios de una tarea.
+   * Los comentarios se almacenan de más reciente a más antiguo, separados por '\n'.
+   * Si no hay comentarios, retorna '—'.
+   *
+   * @param {string} comentarios - Contenido del campo Comentarios de la tarea.
+   * @return {string} Último comentario o '—'.
+   */
+  function obtenerUltimoComentario(comentarios) {
+    if (!comentarios || String(comentarios).trim() === '') return '—';
+    const lineas = String(comentarios).split('\n');
+    for (let i = 0; i < lineas.length; i++) {
+      const linea = lineas[i].trim();
+      if (linea) return linea;
+    }
+    return '—';
+  }
+
+  /**
+   * Determina el Sprint vigente para un proyecto dado.
+   * Sprint vigente = primer Sprint (por orden en la lista) que aún tenga
+   * al menos una tarea en estado 'Pendiente' o 'En Proceso'.
+   * Un Sprint NO es vigente cuando todas sus tareas están en 'Completada'.
+   *
+   * Si todos los Sprints están completos, retorna null.
+   *
+   * @param {string} idProyecto - ID del proyecto.
+   * @return {Object|null} Sprint vigente o null.
+   */
+  function obtenerSprintVigente(idProyecto) {
+    const sprintsProyecto = estado.sprints.filter(s => s.ID_Proyecto === idProyecto);
+    const tareasProyecto  = estado.tareas.filter(t => t.ID_Proyecto === idProyecto);
+
+    for (let i = 0; i < sprintsProyecto.length; i++) {
+      const sprint = sprintsProyecto[i];
+      const tareasSprint = tareasProyecto.filter(
+        t => String(t.ID_Sprint || '').trim() === String(sprint.ID_Sprint || '').trim()
+      );
+      const tieneIncompletas = tareasSprint.some(
+        t => t.Estado_Tarea === 'Pendiente' || t.Estado_Tarea === 'En Proceso'
+      );
+      if (tieneIncompletas) return sprint;
+    }
+    return null;
+  }
+
+  /**
+   * Calcula el porcentaje de avance de un Sprint según la lógica ponderada:
+   * Completada = 100, En Proceso = 50, Pendiente = 0.
+   * Retorna el promedio proporcional de todas las tareas del Sprint.
+   *
+   * @param {string} idProyecto - ID del proyecto.
+   * @param {string} idSprint   - ID del Sprint.
+   * @return {number} Porcentaje de avance (0-100).
+   */
+  function calcularPctAvanceSprint(idProyecto, idSprint) {
+    const tareasSprint = estado.tareas.filter(
+      t => t.ID_Proyecto === idProyecto &&
+           String(t.ID_Sprint || '').trim() === String(idSprint || '').trim()
+    );
+    if (tareasSprint.length === 0) return 0;
+    const suma = tareasSprint.reduce(function(acc, t) {
+      return acc + (t.Estado_Tarea === 'Completada' ? 100 : t.Estado_Tarea === 'En Proceso' ? 50 : 0);
+    }, 0);
+    return Math.round(suma / tareasSprint.length);
+  }
+
+  function renderizarTodo() {
+    renderDashboard();
+    renderTablaProyectos();
+    cargarFiltrosTareas();
+    renderKanbanTareas();
+    cargarSelectProyectos();
+    actualizarFiltroEtapaAdmin();
+    cambiarVista(estado.vistaActual);
+  }
+
+  /**
+   * Muestra u oculta la opción de filtro "6 Iniciativa cerrada" según el rol.
+   * Solo los administradores pueden filtrar por esa etapa.
+   */
+  function actualizarFiltroEtapaAdmin() {
+    const opt = document.getElementById('filtroEstadoCerrada');
+    if (!opt) return;
+    if (estado.esAdmin) {
+      opt.classList.remove('hidden');
+    } else {
+      opt.classList.add('hidden');
+      // Si el filtro activo era la etapa cerrada, limpiarlo
+      const sel = document.getElementById('filtroEstado');
+      if (sel && sel.value === '6 Iniciativa cerrada') { // Valor de etapa cerrada no cambia
+        sel.value = '';
+        aplicarFiltrosProyectos();
+      }
+    }
+  }
+
+  // ============================================================
+  // NAVEGACIÓN ENTRE VISTAS
+  // ============================================================
+  function cambiarVista(vista) {
+    estado.vistaActual = vista;
+    document.querySelectorAll('.vista').forEach(v => v.classList.add('hidden'));
+    document.getElementById('vista-' + vista).classList.remove('hidden');
+
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    const btn = document.querySelector(`[data-vista="${vista}"]`);
+    if (btn) btn.classList.add('active');
+
+    document.getElementById('mobileMenu').classList.add('hidden');
+
+    if (vista === 'reportes') {
+      inicializarReportes();
+    }
+  }
+
+  function verTareasDeProyecto(idProyecto) {
+    const selectProy = document.getElementById('filtroProyectoTarea');
+    if (selectProy) selectProy.value = idProyecto;
+
+    const selectFase = document.getElementById('filtroFaseTarea');
+    if (selectFase) selectFase.value = '';
+    const selectResp = document.getElementById('filtroResponsableTarea');
+    if (selectResp) selectResp.value = '';
+
+    cambiarVista('tareas');
+    renderKanbanTareas();
+  }
+
+  // ============================================================
+  // ACCESO DIRECTO DESDE EL CORREO (deep link a una tarea)
+  // ============================================================
+  function aplicarParametrosURL() {
+    if (!(window.google && google.script && google.script.url && google.script.url.getLocation)) return;
+    google.script.url.getLocation(function (location) {
+      const p = (location && location.parameter) || {};
+      if (p.vista) cambiarVista(p.vista);
+      if (p.tarea) irATarea(p.tarea);
+    });
+  }
+
+  function irATarea(idTarea) {
+    cambiarVista('tareas');
+    ['filtroProyectoTarea', 'filtroFaseTarea', 'filtroResponsableTarea', 'filtroVigenciaTarea'].forEach(function (id) {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    renderKanbanTareas();
+    setTimeout(function () {
+      const card = document.getElementById('card-' + idTarea);
+      if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        card.classList.add('tarea-resaltada');
+        setTimeout(function () { card.classList.remove('tarea-resaltada'); }, 6000);
+      } else {
+        mostrarToast('info', 'No se encontró la tarea indicada en el enlace.');
+      }
+    }, 350);
+  }
+
+  // ============================================================
+  // DASHBOARD
+  // ============================================================
+  function renderDashboard() {
+    const datos = obtenerDatosDashboardFiltrados();
+    const s = calcularEstadisticasDashboard(datos.proyectos, datos.tareas);
+
+    document.getElementById('kpi-total-proyectos').textContent    = s.totalProyectos;
+    document.getElementById('kpi-proyectos-activos').textContent  = s.proyectosActivos;
+    document.getElementById('kpi-tareas-pendientes').textContent  = s.tareasPendientes;
+
+    renderChartProyectos(s.distribucionEstados);
+    renderChartEmpresas(s.distribucionEmpresas);
+    renderChartTareasEstado(s.tareasPorEstado);
+    
+    // ============================================================
+    // SOLUCIÓN 3: RENDERIZAR NUEVOS GRÁFICOS DEL DASHBOARD
+    // ============================================================
+    renderChartEstadosGestion(s.distribucionEstadosGestion);
+    renderChartImpactos(s.distribucionImpactos);
+    renderChartPropietarios(s.distribucionPropietarios);
+    // ────────────────────────────────────────────────────────────────
+    
+    actualizarBarraFiltroDashboard();
+  }
+
+  function calcularEstadisticasDashboard(proyectos, tareas) {
+    const ESTADOS_PROYECTO = ['1 DISCOVERY (Investigación)','2 CONCEPT STUDIO (Conceptualización)','3 PROJECT SETUP (Planificación)','4 DELIVERY ENGINE (Implementación)','5 LAUNCHPAD (G2M)'];
+    const EMPRESAS         = ['Davivienda','Seguros Bolívar','Constructora Bolívar'];
+    const ESTADOS_TAREA    = ['Pendiente','En Proceso','Completada'];
+    const ESTADOS_GESTION  = ['Activo','En Pausa','Finalizado'];
+    const ETAPA_CERRADA    = '6 Iniciativa cerrada';
+    const IMPACTOS         = ['Ingresos','Eficiencia','Experiencia'];
+    
+    // ============================================================
+    // SOLUCIÓN 3: NUEVAS DISTRIBUCIONES PARA DASHBOARD MEJORADO
+    // ============================================================
+    const distribucionEstadosGestion = ESTADOS_GESTION.map(e => ({ 
+      estado: e, 
+      cantidad: proyectos.filter(p => p.Estado === e).length 
+    }));
+    
+    const distribucionImpactos = IMPACTOS.map(i => ({ 
+      impacto: i, 
+      cantidad: proyectos.filter(p => p.Impacto === i).length 
+    }));
+    
+    const propietariosUnicos = [...new Set(proyectos.map(p => p.Propietario).filter(Boolean))];
+    const distribucionPropietarios = propietariosUnicos.map(prop => ({ 
+      propietario: prop, 
+      cantidad: proyectos.filter(p => p.Propietario === prop).length 
+    })).sort((a, b) => b.cantidad - a.cantidad);
+    // ────────────────────────────────────────────────────────────────
+    
+    return {
+      totalProyectos:      proyectos.length,
+      proyectosActivos:    proyectos.filter(p => p.Etapa && p.Etapa !== '5 LAUNCHPAD (G2M)' && p.Etapa !== ETAPA_CERRADA && !p.Etapa.toLowerCase().includes('bloqueado')).length,
+      tareasPendientes:    tareas.filter(t => t.Estado_Tarea === 'Pendiente').length,
+      distribucionEstados: ESTADOS_PROYECTO.map(e => ({ estado: e, cantidad: proyectos.filter(p => p.Etapa === e).length })),
+      distribucionEmpresas: EMPRESAS.map(em => ({ empresa: em, cantidad: proyectos.filter(p => p.Empresa === em).length })),
+      tareasPorEstado:     ESTADOS_TAREA.map(e => ({ estado: e, cantidad: tareas.filter(t => t.Estado_Tarea === e).length })),
+      distribucionEstadosGestion: distribucionEstadosGestion,
+      distribucionImpactos: distribucionImpactos,
+      distribucionPropietarios: distribucionPropietarios
+    };
+  }
+
+  function obtenerDatosDashboardFiltrados() {
+    const fil = estado.dashboardFiltro || { tipo: null, valor: null };
+    let proyectos = estado.proyectos.slice();
+    let tareas    = estado.tareas.slice();
+
+    if (fil.tipo === 'empresa') {
+      proyectos = proyectos.filter(p => p.Empresa === fil.valor);
+      const ids = new Set(proyectos.map(p => p.ID_Proyecto));
+      tareas = tareas.filter(t => ids.has(t.ID_Proyecto));
+    } else if (fil.tipo === 'estado') {
+      proyectos = proyectos.filter(p => p.Etapa === fil.valor);
+      const ids = new Set(proyectos.map(p => p.ID_Proyecto));
+      tareas = tareas.filter(t => ids.has(t.ID_Proyecto));
+    } else if (fil.tipo === 'estadoTarea') {
+      tareas    = tareas.filter(t => t.Estado_Tarea === fil.valor);
+      const ids = new Set(tareas.map(t => t.ID_Proyecto));
+      proyectos = proyectos.filter(p => ids.has(p.ID_Proyecto));
+    } 
+    // ============================================================
+    // SOLUCIÓN 3: NUEVOS FILTROS PARA DASHBOARD MEJORADO
+    // ============================================================
+    else if (fil.tipo === 'estadoGestion') {
+      proyectos = proyectos.filter(p => p.Estado === fil.valor);
+      const ids = new Set(proyectos.map(p => p.ID_Proyecto));
+      tareas = tareas.filter(t => ids.has(t.ID_Proyecto));
+    } else if (fil.tipo === 'impacto') {
+      proyectos = proyectos.filter(p => p.Impacto === fil.valor);
+      const ids = new Set(proyectos.map(p => p.ID_Proyecto));
+      tareas = tareas.filter(t => ids.has(t.ID_Proyecto));
+    } else if (fil.tipo === 'propietario') {
+      proyectos = proyectos.filter(p => p.Propietario === fil.valor);
+      const ids = new Set(proyectos.map(p => p.ID_Proyecto));
+      tareas = tareas.filter(t => ids.has(t.ID_Proyecto));
+    }
+    // ────────────────────────────────────────────────────────────────
+    
+    return { proyectos, tareas };
+  }
+
+  function setDashboardFiltro(tipo, valor) {
+    const fil = estado.dashboardFiltro;
+    if (fil && fil.tipo === tipo && fil.valor === valor) {
+      estado.dashboardFiltro = { tipo: null, valor: null };
+    } else {
+      estado.dashboardFiltro = { tipo, valor };
+    }
+    renderDashboard();
+  }
+
+  function limpiarFiltroDashboard() {
+    estado.dashboardFiltro = { tipo: null, valor: null };
+    renderDashboard();
+  }
+
+  function actualizarBarraFiltroDashboard() {
+    const barra = document.getElementById('dashboardFiltroBar');
+    if (!barra) return;
+    const fil = estado.dashboardFiltro;
+    if (!fil || !fil.tipo) { barra.classList.add('hidden'); return; }
+    const etiqueta = fil.tipo === 'empresa' ? 'Empresa'
+                   : fil.tipo === 'estado'  ? 'Fase de iniciativa'
+                   : fil.tipo === 'estadoTarea' ? 'Estado de tarea'
+                   : fil.tipo === 'estadoGestion' ? 'Estado de gestión'
+                   : fil.tipo === 'impacto' ? 'Impacto'
+                   : fil.tipo === 'propietario' ? 'Propietario'
+                   : 'Filtro';
+    const txt = document.getElementById('dashboardFiltroTexto');
+    if (txt) txt.innerHTML = '<i class="bi bi-funnel-fill"></i> Filtrando por ' + etiqueta + ': <strong>' + escapeHtml(fil.valor) + '</strong>';
+    barra.classList.remove('hidden');
+  }
+
+  function renderChartProyectos(data) {
+    if (estado.charts.proyectos) estado.charts.proyectos.destroy();
+    const ctx = document.getElementById('chartProyectos').getContext('2d');
+    estado.charts.proyectos = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: data.map(d => d.estado),
+        datasets: [{
+          label: 'Iniciativas',
+          data: data.map(d => d.cantidad),
+          backgroundColor: ['#9ca3af', '#60a5fa', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#10b981']
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+        onClick: function (evt, els) {
+          if (els && els.length) setDashboardFiltro('estado', data[els[0].index].estado);
+        }
+      }
+    });
+  }
+
+  function renderChartTareas(data) {
+    if (estado.charts.tareas) estado.charts.tareas.destroy();
+    const ctx = document.getElementById('chartTareas').getContext('2d');
+    estado.charts.tareas = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: data.map(d => d.prioridad),
+        datasets: [{
+          label: 'Cantidad',
+          data: data.map(d => d.cantidad),
+          backgroundColor: ['#ef4444', '#f59e0b', '#10b981']
+        }]
+      },
+      options: { responsive: true, plugins: { legend: { display: false } } }
+    });
+  }
+
+  function renderChartEmpresas(data) {
+    if (estado.charts.empresas) estado.charts.empresas.destroy();
+    const ctx = document.getElementById('chartEmpresas').getContext('2d');
+    estado.charts.empresas = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: data.map(d => d.empresa),
+        datasets: [{
+          label: 'Iniciativas',
+          data: data.map(d => d.cantidad),
+          backgroundColor: ['#dc2626', '#16a34a', '#2563eb']
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: { x: { beginAtZero: true, ticks: { precision: 0 } } },
+        onClick: function (evt, els) {
+          if (els && els.length) setDashboardFiltro('empresa', data[els[0].index].empresa);
+        }
+      }
+    });
+  }
+
+  function renderChartTareasEstado(data) {
+    const canvas = document.getElementById('chartTareasEstado');
+    if (!canvas) return;
+    if (estado.charts.tareasEstado) estado.charts.tareasEstado.destroy();
+    const ctx = canvas.getContext('2d');
+    estado.charts.tareasEstado = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: data.map(d => d.estado),
+        datasets: [{
+          label: 'Tareas',
+          data: data.map(d => d.cantidad),
+          backgroundColor: ['#9ca3af', '#3b82f6', '#10b981']
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+        onClick: function (evt, els) {
+          if (els && els.length) setDashboardFiltro('estadoTarea', data[els[0].index].estado);
+        }
+      }
+    });
+  }
+
+
+  /* ============================================================
+   * SOLUCIÓN 3: NUEVOS GRÁFICOS PARA DASHBOARD MEJORADO
+   * ============================================================ */
+
+  function renderChartEstadosGestion(data) {
+    const canvas = document.getElementById('chartEstadosGestion');
+    if (!canvas) return;
+    if (estado.charts.estadosGestion) estado.charts.estadosGestion.destroy();
+    const ctx = canvas.getContext('2d');
+    estado.charts.estadosGestion = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: data.map(d => d.estado),
+        datasets: [{
+          data: data.map(d => d.cantidad),
+          backgroundColor: ['#10b981', '#f59e0b', '#ef4444']
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom' } },
+        onClick: function (evt, els) {
+          if (els && els.length) setDashboardFiltro('estadoGestion', data[els[0].index].estado);
+        }
+      }
+    });
+  }
+
+  function renderChartImpactos(data) {
+    const canvas = document.getElementById('chartImpactos');
+    if (!canvas) return;
+    if (estado.charts.impactos) estado.charts.impactos.destroy();
+    const ctx = canvas.getContext('2d');
+    estado.charts.impactos = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: data.map(d => d.impacto),
+        datasets: [{
+          label: 'Iniciativas',
+          data: data.map(d => d.cantidad),
+          backgroundColor: ['#8b5cf6', '#3b82f6', '#ec4899']
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { x: { beginAtZero: true, ticks: { precision: 0 } } },
+        onClick: function (evt, els) {
+          if (els && els.length) setDashboardFiltro('impacto', data[els[0].index].impacto);
+        }
+      }
+    });
+  }
+
+  function renderChartPropietarios(data) {
+    const canvas = document.getElementById('chartPropietarios');
+    if (!canvas) return;
+    if (estado.charts.propietarios) estado.charts.propietarios.destroy();
+    const ctx = canvas.getContext('2d');
+    const maxItems = Math.min(data.length, 6);
+    const dataTruncada = data.slice(0, maxItems);
+    estado.charts.propietarios = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: dataTruncada.map(d => d.propietario.split('@')[0]),
+        datasets: [{
+          label: 'Iniciativas',
+          data: dataTruncada.map(d => d.cantidad),
+          backgroundColor: '#06b6d4'
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { x: { beginAtZero: true, ticks: { precision: 0 } } },
+        onClick: function (evt, els) {
+          if (els && els.length) setDashboardFiltro('propietario', dataTruncada[els[0].index].propietario);
+        }
+      }
+    });
+  }
+
+  // ============================================================
+  // PROYECTOS - RENDER COMPLETO E INTEGRAL
+  // ============================================================
+  function renderTablaProyectos() {
+    const tbody = document.getElementById('tablaProyectos');
+
+    if (estado.proyectos.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="10" class="text-center py-8 text-gray-500">No hay Iniciativas. ¡Crea la primera!</td></tr>';
+      actualizarContadorResultados(0, 0);
+      return;
+    }
+
+    cargarOpcionesLider();
+    const filtrados = filtrarProyectos(estado.proyectos);
+    estado.proyectosFiltrados = filtrados;
+    actualizarContadorResultados(filtrados.length, estado.proyectos.length);
+
+    if (filtrados.length === 0) {
+      tbody.innerHTML = `
+        <tr><td colspan="10" class="text-center py-8 text-gray-500">
+          <i class="bi bi-search text-3xl block mb-2"></i>
+          No hay proyectos que coincidan con los filtros aplicados.
+        </td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtrados.map(p => {
+      const faseNum  = String(p.Etapa || '').trim().charAt(0) || '1';
+      const estadoGestion = p.Estado || 'Activo';
+      const estadoGestionClase = estadoGestion === 'Finalizado' ? 'estado-gestion-finalizado'
+                               : estadoGestion === 'En Pausa'  ? 'estado-gestion-pausa'
+                               : 'estado-gestion-activo';
+      const numTareas = estado.tareas.filter(t => t.ID_Proyecto === p.ID_Proyecto).length;
+
+      // Req 3 & 4: Progreso y fechas basados en el Sprint vigente
+      const sprintVigente = obtenerSprintVigente(p.ID_Proyecto);
+      const real = sprintVigente
+        ? calcularPctAvanceSprint(p.ID_Proyecto, sprintVigente.ID_Sprint)
+        : Number(p.Progreso) || 0;
+      const fechaInicioEtapa = sprintVigente ? (sprintVigente.Fecha_Inicio || '—') : (p.Fecha_Inicio || '—');
+      const fechaFinEtapa    = sprintVigente ? (sprintVigente.Fecha_Fin    || '—') : (p.Fecha_Fin    || '—');
+
+
+
+      return `
+        <tr>
+          <td>
+            <div class="cell-name">${escapeHtml(p.Nombre)}</div>
+            <div class="cell-ally"><i class="bi bi-rocket-takeoff"></i> Aliado: ${escapeHtml(p.Startup || 'Por definir')}${p.Aliado_URL ? ` · <a href="${escapeHtml(p.Aliado_URL)}" target="_blank" rel="noopener" title="Página web del aliado"><i class="bi bi-box-arrow-up-right"></i> Web</a>` : ''}</div>
+          </td>
+          <td>
+            <span class="badge-empresa-${(p.Empresa || '').toLowerCase().replace(/ /g,'-')}">${escapeHtml(p.Empresa || '—')}</span>
+          </td>
+          <td style="color:var(--text-soft)">${escapeHtml(p.Lider)}</td>
+          <td>
+            <div class="cell-dates">${fechaInicioEtapa}<br><span class="arrow">→ ${fechaFinEtapa}</span></div>
+          </td>
+          <td>
+            ${(p.Etapa === '6 Iniciativa cerrada') && !estado.esAdmin
+              ? `<span class="estado-select estado-fase-6" style="display:inline-block;cursor:default;opacity:0.85;" title="Esta iniciativa está cerrada">
+                   ${escapeHtml(p.Etapa)} <i class="bi bi-lock-fill" style="font-size:0.7rem;"></i>
+                 </span>`
+              : `<select onchange="solicitarCambioEtapa('${p.ID_Proyecto}', this.value)" class="estado-select estado-fase-${faseNum}">
+                   <option ${p.Etapa==='1 DISCOVERY (Investigación)'?'selected':''}>1 DISCOVERY (Investigación)</option>
+                   <option ${p.Etapa==='2 CONCEPT STUDIO (Conceptualización)'?'selected':''}>2 CONCEPT STUDIO (Conceptualización)</option>
+                   <option ${p.Etapa==='3 PROJECT SETUP (Planificación)'?'selected':''}>3 PROJECT SETUP (Planificación)</option>
+                   <option ${p.Etapa==='4 DELIVERY ENGINE (Implementación)'?'selected':''}>4 DELIVERY ENGINE (Implementación)</option>
+                   <option ${p.Etapa==='5 LAUNCHPAD (G2M)'?'selected':''}>5 LAUNCHPAD (G2M)</option>
+                   ${estado.esAdmin ? `<option ${ p.Etapa==='6 Iniciativa cerrada'?'selected':''}>6 Iniciativa cerrada</option>` : ''}
+                 </select>`
+            }
+          </td>
+          <td>
+            ${estadoGestion === 'Finalizado' && !estado.esAdmin
+              ? `<span class="estado-select ${estadoGestionClase}" style="display:inline-block;cursor:default;opacity:0.85;" title="Solo administradores pueden modificar este estado">
+                   ${escapeHtml(estadoGestion)} <i class="bi bi-lock-fill" style="font-size:0.7rem;"></i>
+                 </span>`
+              : `<select onchange="solicitarCambioEstadoGestion('${p.ID_Proyecto}', this.value)" class="estado-select ${estadoGestionClase}">
+                   <option ${estadoGestion==='Activo'?'selected':''}>Activo</option>
+                   <option ${estadoGestion==='En Pausa'?'selected':''}>En Pausa</option>
+                   <option ${estadoGestion==='Finalizado'?'selected':''}>Finalizado</option>
+                 </select>`
+            }
+          </td>
+          <td style="min-width:160px">
+            <div class="prog-row">
+              <span class="prog-key">Real</span>
+              <span style="font-size:.8rem;font-weight:600;color:var(--text)">${real}%</span>
+            </div>
+            <div class="prog-track"><div class="prog-fill brand" style="width:${real}%"></div></div>
+          </td>
+          <td class="center">
+            <button type="button" onclick="verTareasDeProyecto('${p.ID_Proyecto}')"
+                    class="chip-count" title="Ver las tareas de esta iniciativa">
+              <i class="bi bi-list-task"></i> ${numTareas}
+            </button>
+          </td>
+          <td class="center">
+            ${p.Carpeta_URL
+              ? `<a href="${escapeHtml(p.Carpeta_URL)}" target="_blank" rel="noopener" class="icon-link" title="Abrir carpeta en Drive"><i class="bi bi-folder2-open"></i></a>`
+              : `<span class="icon-link is-off" title="Sin carpeta asociada"><i class="bi bi-folder-x"></i></span>`}
+          </td>
+          <td class="center">
+            <span style="display:inline-flex;gap:7px">
+              <button onclick="abrirModalTarea('${p.ID_Proyecto}')" class="row-action" title="Crear tarea para esta iniciativa">
+                <i class="bi bi-plus-lg"></i>
+              </button>
+              <button onclick="eliminarProyectoConfirm('${p.ID_Proyecto}')" class="row-action danger" title="Eliminar iniciativa">
+                <i class="bi bi-trash"></i>
+              </button>
+            </span>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // ============================================================
+  // FILTROS DE PROYECTOS
+  // ============================================================
+  function aplicarFiltrosProyectos() {
+    estado.filtrosProyectos = {
+      busqueda:  document.getElementById('filtroBusqueda').value.toLowerCase().trim(),
+      estado:    document.getElementById('filtroEstado').value,
+      empresa:   document.getElementById('filtroEmpresa').value,
+      lider:     document.getElementById('filtroLider').value,
+      situacion: document.getElementById('filtroSituacion').value
+    };
+    renderTablaProyectos();
+  }
+
+  function filtrarProyectos(proyectos) {
+    const f = estado.filtrosProyectos;
+
+    return proyectos.filter(p => {
+      if (f.estado    && p.Etapa               !== f.estado)    return false;
+      if (f.lider     && p.Lider               !== f.lider)     return false;
+      if (f.empresa   && p.Empresa             !== f.empresa)   return false;
+      if (f.situacion && p.Estado_Comparacion  !== f.situacion) return false;
+
+      if (f.busqueda) {
+        const texto = [p.ID_Proyecto, p.Nombre, p.Descripcion, p.Lider, p.Empresa, p.Startup]
+          .join(' ').toLowerCase();
+        if (!texto.includes(f.busqueda)) return false;
+      }
+      return true;
+    });
+  }
+
+  function cargarOpcionesLider() {
+    const select = document.getElementById('filtroLider');
+    if (!select) return;
+
+    const seleccionado = select.value;
+    const lideres = [...new Set(estado.proyectos.map(p => p.Lider).filter(Boolean))].sort();
+
+    select.innerHTML = '<option value="">Todos los líderes</option>' +
+      lideres.map(l => `<option value="${escapeHtml(l)}" ${l === seleccionado ? 'selected' : ''}>${escapeHtml(l)}</option>`).join('');
+  }
+
+  function actualizarContadorResultados(visibles, total) {
+    const contador = document.getElementById('contadorResultados');
+    if (!contador) return;
+
+    if (visibles === total) {
+      contador.textContent = `${total} proyecto(s)`;
+      contador.className   = 'ml-auto text-sm text-gray-500';
+    } else {
+      contador.textContent = `Mostrando ${visibles} de ${total}`;
+      contador.className   = 'ml-auto text-sm text-indigo-600 font-semibold';
+    }
+  }
+
+  function limpiarFiltrosProyectos() {
+    document.getElementById('filtroBusqueda').value = '';
+    document.getElementById('filtroEstado').value   = '';
+    document.getElementById('filtroEmpresa').value  = '';
+    document.getElementById('filtroLider').value    = '';
+    document.getElementById('filtroSituacion').value = '';
+    aplicarFiltrosProyectos();
+  }
+
+  function abrirModalProyecto() {
+    document.getElementById('formProyecto').reset();
+    document.getElementById('ini_id').value = '';
+    desbloquearBotonGuardar(document.querySelector('#formProyecto button[type="submit"]'));
+
+    const inputStartup = document.getElementById('ini_startup');
+    if (inputStartup) inputStartup.oninput = toggleAliadoUrlField;
+    toggleAliadoUrlField();
+
+    document.getElementById('modalProyecto').classList.remove('hidden');
+  }
+
+  function toggleAliadoUrlField() {
+    const inputStartup = document.getElementById('ini_startup');
+    const wrap = document.getElementById('ini_aliado_url_wrap');
+    if (!wrap) return;
+
+    const hayAliado = inputStartup && inputStartup.value.trim().length > 0;
+    if (hayAliado) {
+      wrap.classList.remove('hidden');
+    } else {
+      wrap.classList.add('hidden');
+      const inputUrl = document.getElementById('ini_aliado_url');
+      if (inputUrl) inputUrl.value = '';
+    }
+  }
+
+  function guardarProyecto(event) {
+    event.preventDefault();
+
+    const btn = event.submitter || document.querySelector('#formProyecto button[type="submit"]');
+    if (btn && btn.dataset.busy === '1') return;
+
+    const nombreSprintInicialEl = document.getElementById('ini_sprint_nombre');
+    const proyecto = {
+      Nombre:               document.getElementById('ini_nombre').value,
+      Descripcion:          document.getElementById('ini_descripcion').value,
+      Lider:                document.getElementById('ini_lider').value,
+      Empresa:              document.getElementById('ini_empresa').value,
+      Impacto:              document.getElementById('ini_impacto').value,
+      Startup:              document.getElementById('ini_startup').value,
+      Aliado_URL:           document.getElementById('ini_aliado_url').value.trim(),
+      Fecha_Inicio:         document.getElementById('ini_fecha_inicio').value,
+      Fecha_Fin:            document.getElementById('ini_fecha_fin').value,
+      Etapa:                document.getElementById('ini_etapa').value,
+      Estado:               document.getElementById('ini_estado_gestion').value,
+      Progreso:             0,
+      NombreSprintInicial:  nombreSprintInicialEl ? nombreSprintInicialEl.value.trim() : 'Sprint 1'
+    };
+
+    bloquearBotonGuardar(btn, 'Guardando...');
+    bloquearModal('modalProyecto');
+    mostrarLoader(true);
+    google.script.run
+      .withSuccessHandler(res => {
+        desbloquearBotonGuardar(btn);
+        desbloquearModal('modalProyecto');
+        cerrarModal('modalProyecto');
+        mostrarToast('success', res.mensaje);
+        cargarTodo();
+      })
+      .withFailureHandler(err => {
+        desbloquearBotonGuardar(btn);
+        desbloquearModal('modalProyecto');
+        manejarError(err);
+      })
+      .crearProyecto(proyecto);
+  }
+
+  // LEGADO (no usado): cambio de etapa mediante prompt() nativo. Se conserva
+  // por compatibilidad. El flujo actual usa solicitarCambioEtapa() con un modal
+  // propio de la aplicación (REQ 4 y REQ 5). No se elimina para no romper nada.
+  function cambiarEstadoProyecto(id, nuevoEstado) {
+    const proyecto = estado.proyectos.find(p => p.ID_Proyecto === id);
+    if (!proyecto) {
+      mostrarToast('error', 'Proyecto no encontrado.');
+      return;
+    }
+
+    const estadoAnterior = proyecto.Etapa;
+    if (estadoAnterior === nuevoEstado) return;
+
+    const comentario = prompt(
+      `Vas a cambiar el estado del proyecto:\n\n` +
+      `"${proyecto.Nombre}"\n` +
+      `${estadoAnterior} → ${nuevoEstado}\n\n` +
+      `Escribe el motivo del cambio (mínimo 5 caracteres):`
+    );
+
+    if (comentario === null) {
+      mostrarToast('info', 'Cambio cancelado.');
+      cargarTodo();
+      return;
+    }
+
+    if (comentario.trim().length < 5) {
+      mostrarToast('error', 'Comentario muy corto. El cambio fue cancelado.');
+      cargarTodo();
+      return;
+    }
+
+    mostrarLoader(true);
+    google.script.run
+      .withSuccessHandler(res => {
+        mostrarToast('success', res.mensaje);
+        cargarTodo();
+      })
+      .withFailureHandler(err => {
+        manejarError(err);
+        cargarTodo();
+      })
+      .cambiarEstadoProyectoConComentario({
+        ID_Proyecto: id,
+        nuevoEstado: nuevoEstado,
+        comentario:  comentario
+      });
+  }
+
+
+
+  // ============================================================
+  // REQ 4: CAMBIO DE ETAPA (modal propio de la aplicación)
+  // ============================================================
+  function solicitarCambioEtapa(id, nuevaEtapa) {
+    const proyecto = estado.proyectos.find(p => p.ID_Proyecto === id);
+    if (!proyecto) {
+      mostrarToast('error', 'Proyecto no encontrado.');
+      return;
+    }
+    const etapaAnterior = proyecto.Etapa;
+    if (etapaAnterior === nuevaEtapa) return;
+
+    document.getElementById('cambioEtapa_id').value    = id;
+    document.getElementById('cambioEtapa_nueva').value = nuevaEtapa;
+    document.getElementById('cambioEtapa_info').innerHTML =
+      '<i class="bi bi-signpost-2"></i> ' + escapeHtml(proyecto.Nombre) +
+      '<br><strong>' + escapeHtml(etapaAnterior || '—') + '</strong> → <strong>' + escapeHtml(nuevaEtapa) + '</strong>';
+    document.getElementById('cambioEtapa_motivo').value  = '';
+    document.getElementById('cambioEtapa_fechaFin').value = '';
+
+    document.getElementById('modalCambioEtapa').classList.remove('hidden');
+    setTimeout(() => document.getElementById('cambioEtapa_motivo').focus(), 100);
+  }
+
+  // Cerrar el modal recargando para que el <select> vuelva a su valor real.
+  function cancelarCambioEtapa() {
+    cerrarModal('modalCambioEtapa');
+    mostrarToast('info', 'Cambio de etapa cancelado.');
+    cargarTodo();
+  }
+
+  function confirmarCambioEtapa() {
+    const id       = document.getElementById('cambioEtapa_id').value;
+    const nueva    = document.getElementById('cambioEtapa_nueva').value;
+    const motivo   = document.getElementById('cambioEtapa_motivo').value.trim();
+    const fechaFin = document.getElementById('cambioEtapa_fechaFin').value;
+
+    if (motivo.length < 5) {
+      mostrarToast('error', 'El motivo debe tener al menos 5 caracteres.');
+      document.getElementById('cambioEtapa_motivo').focus();
+      return;
+    }
+    if (!fechaFin) {
+      mostrarToast('error', 'Indica la fecha final de la nueva etapa.');
+      document.getElementById('cambioEtapa_fechaFin').focus();
+      return;
+    }
+
+    cerrarModal('modalCambioEtapa');
+    mostrarLoader(true);
+    google.script.run
+      .withSuccessHandler(res => {
+        mostrarToast('success', res.mensaje);
+        cargarTodo();
+      })
+      .withFailureHandler(err => {
+        manejarError(err);
+        cargarTodo();
+      })
+      .cambiarEtapaProyecto({ ID_Proyecto: id, nuevaEtapa: nueva, motivo: motivo, fechaFin: fechaFin });
+  }
+
+  // ============================================================
+  // REQ 5: CAMBIO DE ESTADO (modal propio de la aplicación)
+  // ============================================================
+  function solicitarCambioEstadoGestion(id, nuevoEstado) {
+    const proyecto = estado.proyectos.find(p => p.ID_Proyecto === id);
+    if (!proyecto) {
+      mostrarToast('error', 'Proyecto no encontrado.');
+      // Recargar para restaurar el valor del select
+      cargarTodo();
+      return;
+    }
+    const estadoAnterior = proyecto.Estado || 'Activo';
+    if (estadoAnterior === nuevoEstado) return;
+
+    // ============================================================
+    // RESTRICCIÓN DE INTERFAZ — Solo admins modifican proyectos Finalizados
+    // ============================================================
+    if (estadoAnterior === 'Finalizado' && !estado.esAdmin) {
+      mostrarToast('error',
+        'No tienes permisos para modificar el estado de un proyecto Finalizado. ' +
+        'Contacta a un administrador del sistema.'
+      );
+      cargarTodo();
+      return;
+    }
+    // ────────────────────────────────────────────────────────────
+
+    document.getElementById('cambioEstado_id').value    = id;
+    document.getElementById('cambioEstado_nuevo').value = nuevoEstado;
+    document.getElementById('cambioEstado_info').innerHTML =
+      '<i class="bi bi-toggle-on"></i> ' + escapeHtml(proyecto.Nombre) +
+      '<br><strong>' + escapeHtml(estadoAnterior) + '</strong> → <strong>' + escapeHtml(nuevoEstado) + '</strong>';
+    document.getElementById('cambioEstado_motivo').value = '';
+
+    document.getElementById('modalCambioEstado').classList.remove('hidden');
+    setTimeout(() => document.getElementById('cambioEstado_motivo').focus(), 100);
+  }
+
+  function cancelarModalCambioEstado() {
+    cerrarModal('modalCambioEstado');
+    mostrarToast('info', 'Cambio de estado cancelado.');
+    cargarTodo();
+  }
+
+  function confirmarCambioEstadoGestion() {
+    const id     = document.getElementById('cambioEstado_id').value;
+    const nuevo  = document.getElementById('cambioEstado_nuevo').value;
+    const motivo = document.getElementById('cambioEstado_motivo').value.trim();
+
+    if (motivo.length < 5) {
+      mostrarToast('error', 'El motivo debe tener al menos 5 caracteres.');
+      document.getElementById('cambioEstado_motivo').focus();
+      return;
+    }
+
+    cerrarModal('modalCambioEstado');
+    mostrarLoader(true);
+    google.script.run
+      .withSuccessHandler(res => {
+        mostrarToast('success', res.mensaje);
+        cargarTodo();
+      })
+      .withFailureHandler(err => {
+        manejarError(err);
+        cargarTodo();
+      })
+      .cambiarEstadoGestionProyecto({ ID_Proyecto: id, nuevoEstado: nuevo, motivo: motivo });
+  }
+
+
+
+  function eliminarProyectoConfirm(id) {
+    const proyecto = estado.proyectos.find(p => p.ID_Proyecto === id);
+    const nombre = proyecto ? proyecto.Nombre : '';
+    confirmarAccion({
+      titulo: 'Eliminar iniciativa',
+      mensaje: nombre
+        ? `¿Eliminar la iniciativa "${nombre}"? Esta acción no se puede deshacer.`
+        : '¿Eliminar esta iniciativa? Esta acción no se puede deshacer.',
+      textoAceptar: 'Eliminar',
+      onConfirmar: function () {
+        mostrarLoader(true);
+        google.script.run
+          .withSuccessHandler(res => {
+            mostrarToast('success', res.mensaje);
+            cargarTodo();
+          })
+          .withFailureHandler(manejarError)
+          .eliminarProyecto(id);
+      }
+    });
+  }
+
+  // ============================================================
+  // TAREAS - KANBAN
+  // ============================================================
+  function renderKanbanTareas() {
+    const columnas = { 'Pendiente': [], 'En Proceso': [], 'Completada': [] };
+
+    const filtroFase        = document.getElementById('filtroFaseTarea')?.value        || '';
+    const filtroProyecto    = document.getElementById('filtroProyectoTarea')?.value    || '';
+    const filtroResponsable = document.getElementById('filtroResponsableTarea')?.value || '';
+    const filtroVigencia    = document.getElementById('filtroVigenciaTarea')?.value    || '';
+
+    const hoy = new Date();
+    const hoyStr = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0') + '-' + String(hoy.getDate()).padStart(2, '0');
+
+    const tareasFiltradas = estado.tareas.filter(t => {
+      if (filtroFase        && t.Estado_Proyecto_Asignado !== filtroFase)        return false;
+      if (filtroProyecto    && t.ID_Proyecto               !== filtroProyecto)   return false;
+      if (filtroResponsable && t.Asignado_A                !== filtroResponsable) return false;
+      if (filtroVigencia) {
+        const fechaEntrega = (t.Fecha_Entrega || '').slice(0, 10);
+        const atrasada = t.Estado_Tarea !== 'Completada' && fechaEntrega !== '' && fechaEntrega < hoyStr;
+        if (filtroVigencia === 'atrasadas' && !atrasada) return false;
+        if (filtroVigencia === 'vigentes'  && (atrasada || t.Estado_Tarea === 'Completada')) return false;
+      }
+      return true;
+    });
+
+    tareasFiltradas.forEach(t => {
+      if (columnas[t.Estado_Tarea]) columnas[t.Estado_Tarea].push(t);
+    });
+
+    document.getElementById('col-Pendiente').innerHTML  = renderColumnaKanban(columnas['Pendiente']);
+    document.getElementById('col-EnProceso').innerHTML  = renderColumnaKanban(columnas['En Proceso']);
+    document.getElementById('col-Completada').innerHTML = renderColumnaKanban(columnas['Completada']);
+
+    document.getElementById('count-Pendiente').textContent  = columnas['Pendiente'].length;
+    document.getElementById('count-EnProceso').textContent  = columnas['En Proceso'].length;
+    document.getElementById('count-Completada').textContent = columnas['Completada'].length;
+  }
+
+  function renderColumnaKanban(tareas) {
+    if (tareas.length === 0) return '<p class="text-xs text-gray-400 text-center py-4">Sin tareas</p>';
+
+    return tareas.map(t => {
+      const proyecto    = estado.proyectos.find(p => p.ID_Proyecto === t.ID_Proyecto);
+      const nombreProy  = proyecto ? proyecto.Nombre : t.ID_Proyecto;
+      const bloqueada   = t.Estado_Tarea === 'Completada';
+      const historialHtml = formatearHistorialComentarios(t.Comentarios);
+
+      const transicionesTarea = {
+        'Pendiente':  ['Pendiente', 'En Proceso'],
+        'En Proceso': ['En Proceso', 'Completada'],
+        'Completada': ['Completada']
+      };
+      const estadosDisponibles = transicionesTarea[t.Estado_Tarea] || [t.Estado_Tarea];
+      const opcionesEstado = estadosDisponibles
+        .map(e => `<option ${t.Estado_Tarea === e ? 'selected' : ''}>${e}</option>`)
+        .join('');
+
+      return `
+        <div class="kanban-card prioridad-${t.Prioridad} ${bloqueada ? 'tarea-bloqueada' : ''}" id="card-${t.ID_Tarea}">
+          <div class="flex justify-between items-start mb-1">
+            <span class="font-semibold text-sm">
+              ${bloqueada ? '<i class="bi bi-lock-fill" style="color:var(--ok)"></i> ' : ''}${t.Nombre_Tarea}
+            </span>
+            ${bloqueada
+              ? ''
+              : `<button onclick="eliminarTareaConfirm('${t.ID_Tarea}')" class="text-red-400 hover:text-red-600 text-xs">
+                   <i class="bi bi-x-circle"></i>
+                 </button>`
+            }
+          </div>
+
+          <p class="text-xs text-gray-500 mb-1"><i class="bi bi-folder"></i> ${nombreProy}</p>
+          ${t.Estado_Proyecto_Asignado ? `<p class="text-xs text-indigo-600 mb-1"><i class="bi bi-bullseye"></i> Fase: ${escapeHtml(t.Estado_Proyecto_Asignado)}</p>` : ''}
+          <p class="text-xs text-gray-600"><i class="bi bi-person"></i> ${t.Asignado_A}</p>
+          ${t.Fecha_Entrega     ? `<p class="text-xs text-gray-500"><i class="bi bi-calendar3"></i> Entrega: ${t.Fecha_Entrega}</p>` : ''}
+          ${t.Fecha_Completada  ? `<p class="text-xs text-green-600"><i class="bi bi-check-circle-fill"></i> Completada: ${t.Fecha_Completada}</p>` : ''}
+          ${t.Descripcion       ? `<p class="text-xs text-gray-700 mt-1 italic">"${escapeHtml(t.Descripcion)}"</p>` : ''}
+
+          <div class="mt-2">
+            <select
+              id="select-${t.ID_Tarea}"
+              onchange="abrirFormularioCambio('${t.ID_Tarea}', this.value, false)"
+              class="text-xs border rounded px-1 py-0.5 w-full"
+              ${bloqueada ? 'disabled' : ''}
+              data-estado-actual="${t.Estado_Tarea}"
+            >
+              ${opcionesEstado}
+            </select>
+          </div>
+
+          ${!bloqueada ? `
+            <button onclick="abrirFormularioComentario('${t.ID_Tarea}')" class="mt-1 text-xs text-indigo-600 hover:text-indigo-800 hover:underline">
+              <i class="bi bi-chat-left-dots"></i> Agregar comentario
+            </button>
+          ` : ''}
+
+          <div id="form-cambio-${t.ID_Tarea}" class="hidden mt-2 p-2 bg-indigo-50 border border-indigo-200 rounded">
+            <p class="text-xs font-semibold text-indigo-800 mb-1">
+              <i class="bi bi-chat-left-text"></i> Comentario del cambio:
+            </p>
+            <p class="text-xs text-gray-600 mb-2" id="info-cambio-${t.ID_Tarea}"></p>
+            <textarea
+              id="comentario-${t.ID_Tarea}"
+              rows="2"
+              maxlength="300"
+              placeholder="¿Por qué se hace este cambio?"
+              class="w-full text-xs border rounded p-1 mb-2"
+            ></textarea>
+            <div class="flex gap-1">
+              <button
+                onclick="confirmarCambioEstado('${t.ID_Tarea}')"
+                class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs py-1 rounded">
+                <i class="bi bi-check-lg"></i> Confirmar
+              </button>
+              <button
+                onclick="cancelarCambioEstado('${t.ID_Tarea}')"
+                class="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 text-xs py-1 rounded">
+                <i class="bi bi-x-lg"></i> Cancelar
+              </button>
+            </div>
+          </div>
+
+          ${historialHtml}
+        </div>
+      `;
+    }).join('');
+  }
+
+  function cargarFiltrosTareas() {
+    const selectProy = document.getElementById('filtroProyectoTarea');
+    if (selectProy) {
+      const seleccionadoProy = selectProy.value;
+      selectProy.innerHTML = '<option value="">Todos los proyectos</option>' +
+        estado.proyectos.map(p => `<option value="${p.ID_Proyecto}" ${p.ID_Proyecto === seleccionadoProy ? 'selected' : ''}>${escapeHtml(p.Nombre)}</option>`).join('');
+    }
+
+    const selectResp = document.getElementById('filtroResponsableTarea');
+    if (selectResp) {
+      const seleccionadoResp = selectResp.value;
+      const responsables = [...new Set(estado.tareas.map(t => t.Asignado_A).filter(Boolean))].sort();
+      selectResp.innerHTML = '<option value="">Todos los responsables</option>' +
+        responsables.map(r => `<option value="${escapeHtml(r)}" ${r === seleccionadoResp ? 'selected' : ''}>${escapeHtml(r)}</option>`).join('');
+    }
+  }
+
+  function limpiarFiltrosTareas() {
+    document.getElementById('filtroProyectoTarea').value    = '';
+    document.getElementById('filtroFaseTarea').value        = '';
+    document.getElementById('filtroResponsableTarea').value = '';
+    document.getElementById('filtroVigenciaTarea').value    = '';
+    renderKanbanTareas();
+  }
+
+  function formatearHistorialComentarios(comentariosRaw) {
+    if (!comentariosRaw || String(comentariosRaw).trim() === '') return '';
+
+    const lineas = String(comentariosRaw).split('\n').filter(l => l.trim());
+    if (lineas.length === 0) return '';
+
+    const visibles = lineas.slice(0, 2);
+    const ocultas  = lineas.slice(2);
+
+    const htmlVisibles = visibles.map(l =>
+      `<p class="text-xs text-gray-600 border-l-2 border-indigo-300 pl-2 py-0.5 my-1">${escapeHtml(l)}</p>`
+    ).join('');
+
+    let htmlOcultas = '';
+    if (ocultas.length > 0) {
+      htmlOcultas = `
+        <details class="mt-1">
+          <summary class="text-xs text-indigo-600 cursor-pointer hover:underline">
+            Ver ${ocultas.length} comentario(s) más
+          </summary>
+          <div class="mt-1">
+            ${ocultas.map(l => `<p class="text-xs text-gray-500 border-l-2 border-gray-300 pl-2 py-0.5 my-1">${escapeHtml(l)}</p>`).join('')}
+          </div>
+        </details>
+      `;
+    }
+
+    return `
+      <div class="mt-2 pt-2 border-t border-gray-200">
+        <p class="text-xs font-semibold text-gray-500 mb-1"><i class="bi bi-clock-history"></i> Historial:</p>
+        ${htmlVisibles}
+        ${htmlOcultas}
+      </div>
+    `;
+  }
+
+  function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    const div = document.createElement('div');
+    div.textContent = String(str);
+    return div.innerHTML;
+  }
+
+  function abrirFormularioCambio(idTarea, nuevoEstado, esReapertura) {
+    const select      = document.getElementById(`select-${idTarea}`);
+    const estadoActual = select ? select.dataset.estadoActual : 'Completada';
+    if (!esReapertura && nuevoEstado === estadoActual) return;
+
+    const form     = document.getElementById(`form-cambio-${idTarea}`);
+    const info     = document.getElementById(`info-cambio-${idTarea}`);
+    const textarea = document.getElementById(`comentario-${idTarea}`);
+
+    form.dataset.nuevoEstado   = nuevoEstado;
+    form.dataset.esReapertura  = esReapertura ? 'true' : 'false';
+    form.dataset.soloComentario = 'false';
+
+    if (esReapertura) {
+      info.innerHTML      = `<i class="bi bi-unlock"></i> Reapertura: <strong>Completada → Pendiente</strong>`;
+      textarea.placeholder = 'Motivo de la reapertura';
+    } else {
+      info.innerHTML      = `Cambio: <strong>${estadoActual} → ${nuevoEstado}</strong>`;
+      textarea.placeholder = '¿Por qué se hace este cambio?';
+    }
+
+    textarea.value = '';
+    form.classList.remove('hidden');
+    if (select) select.disabled = true;
+    setTimeout(() => textarea.focus(), 100);
+  }
+
+  function abrirFormularioComentario(idTarea) {
+    const form     = document.getElementById(`form-cambio-${idTarea}`);
+    const info     = document.getElementById(`info-cambio-${idTarea}`);
+    const textarea = document.getElementById(`comentario-${idTarea}`);
+    const select   = document.getElementById(`select-${idTarea}`);
+
+    form.dataset.soloComentario = 'true';
+    form.dataset.esReapertura   = 'false';
+
+    info.innerHTML       = `<i class="bi bi-chat-dots"></i> <strong>Agregar comentario</strong> (sin cambiar el estado)`;
+    textarea.placeholder = 'Escribe tu comentario...';
+    textarea.value       = '';
+    form.classList.remove('hidden');
+    if (select) select.disabled = true;
+    setTimeout(() => textarea.focus(), 100);
+  }
+
+  function cancelarCambioEstado(idTarea) {
+    const form   = document.getElementById(`form-cambio-${idTarea}`);
+    const select = document.getElementById(`select-${idTarea}`);
+    form.classList.add('hidden');
+
+    if (select && select.dataset.estadoActual) {
+      select.value = select.dataset.estadoActual;
+      const tarea = estado.tareas.find(t => t.ID_Tarea === idTarea);
+      if (tarea && tarea.Estado_Tarea !== 'Completada') {
+        select.disabled = false;
+      }
+    }
+  }
+
+  function confirmarCambioEstado(idTarea) {
+    const form      = document.getElementById(`form-cambio-${idTarea}`);
+    const textarea  = document.getElementById(`comentario-${idTarea}`);
+    const comentario = textarea.value.trim();
+
+    if (comentario.length < 5) {
+      mostrarToast('error', 'Por favor ingresa un comentario válido.');
+      textarea.focus();
+      return;
+    }
+
+    const nuevoEstado    = form.dataset.nuevoEstado;
+    const esReapertura   = form.dataset.esReapertura   === 'true';
+    const soloComentario = form.dataset.soloComentario === 'true';
+    mostrarLoader(true);
+
+    if (soloComentario) {
+      google.script.run
+        .withSuccessHandler(res => { mostrarToast('success', res.mensaje); cargarTodo(); })
+        .withFailureHandler(manejarError)
+        .agregarComentarioTarea({ ID_Tarea: idTarea, comentario });
+    } else if (esReapertura) {
+      google.script.run
+        .withSuccessHandler(res => { mostrarToast('success', res.mensaje); cargarTodo(); })
+        .withFailureHandler(manejarError)
+        .reabrirTarea({ ID_Tarea: idTarea, comentario });
+    } else {
+      google.script.run
+        .withSuccessHandler(res => { mostrarToast('success', res.mensaje); cargarTodo(); })
+        .withFailureHandler(manejarError)
+        .cambiarEstadoTareaConComentario({ ID_Tarea: idTarea, nuevoEstado, comentario });
+    }
+  }
+
+  function cargarSelectProyectos() {
+    const select = document.getElementById('tsk_proyecto');
+    select.innerHTML = '<option value="">Seleccione un proyecto...</option>' +
+      estado.proyectos.map(p => `<option value="${p.ID_Proyecto}">${p.Nombre}</option>`).join('');
+  }
+
+  /**
+   * Carga los Sprints del proyecto seleccionado en el selector del modal de tarea.
+   * Si el proyecto tiene Sprints en el estado local, los usa directamente.
+   * Si no hay Sprints, muestra un mensaje orientativo.
+   *
+   * @param {string} idProyecto
+   */
+  function cargarSprintsEnModalTarea(idProyecto) {
+    const selectSprint = document.getElementById('tsk_sprint');
+    if (!selectSprint) return;
+
+    if (!idProyecto) {
+      selectSprint.innerHTML = '<option value="">Seleccione primero un proyecto...</option>';
+      actualizarFechaEntregaInfo(null);
+      return;
+    }
+
+    const sprintsProyecto = estado.sprints.filter(s => s.ID_Proyecto === idProyecto);
+
+    if (sprintsProyecto.length === 0) {
+      selectSprint.innerHTML =
+        '<option value="">— No hay Sprints. Crea uno con el botón "Nuevo" —</option>';
+      actualizarFechaEntregaInfo(null);
+      return;
+    }
+
+    selectSprint.innerHTML =
+      '<option value="">Seleccione un Sprint...</option>' +
+      sprintsProyecto.map(s => {
+        const fechas = s.Fecha_Inicio && s.Fecha_Fin
+          ? ` (${s.Fecha_Inicio} → ${s.Fecha_Fin})`
+          : '';
+        return `<option value="${escapeHtml(s.ID_Sprint)}" data-fecha-fin="${escapeHtml(s.Fecha_Fin || '')}">${escapeHtml(s.Nombre)}${fechas}</option>`;
+      }).join('');
+
+    // Actualizar el campo fecha de entrega cuando cambia el sprint
+    selectSprint.onchange = function () {
+      const optSel = this.options[this.selectedIndex];
+      const fechaFin = optSel ? optSel.dataset.fechaFin : '';
+      actualizarFechaEntregaInfo(fechaFin || null);
+    };
+
+    // Si hay un sprint preseleccionado (p.ej. tras recargar), actualizar la info
+    if (selectSprint.value) {
+      const optSel = selectSprint.options[selectSprint.selectedIndex];
+      actualizarFechaEntregaInfo(optSel ? (optSel.dataset.fechaFin || null) : null);
+    } else {
+      actualizarFechaEntregaInfo(null);
+    }
+  }
+
+  /**
+   * Actualiza el panel informativo de Fecha Entrega en el modal de tarea.
+   * @param {string|null} fechaFin - Fecha de fin del Sprint seleccionado (yyyy-MM-dd) o null.
+   */
+  function actualizarFechaEntregaInfo(fechaFin) {
+    const label = document.getElementById('tsk_fecha_label');
+    if (!label) return;
+    if (fechaFin) {
+      label.textContent = 'Fecha de entrega asignada automáticamente: ' + fechaFin;
+    } else {
+      label.textContent = 'Se asignará automáticamente al seleccionar un Sprint.';
+    }
+  }
+
+  function abrirModalTarea(idProyectoPreseleccionado) {
+    if (estado.proyectos.length === 0) {
+      mostrarToast('error', 'Primero crea al menos un proyecto.');
+      return;
+    }
+    document.getElementById('formTarea').reset();
+    desbloquearBotonGuardar(document.querySelector('#formTarea button[type="submit"]'));
+
+    const wrapRec = document.getElementById('tsk_recordatorio_wrap');
+    if (wrapRec) wrapRec.classList.add('hidden');
+
+    document.getElementById('modalTarea').classList.remove('hidden');
+
+    const selectProy   = document.getElementById('tsk_proyecto');
+    const selectEstado = document.getElementById('tsk_estado_proyecto');
+
+    const sincronizarEstadoYSprints = () => {
+      const proy = estado.proyectos.find(p => p.ID_Proyecto === selectProy.value);
+      if (proy && proy.Etapa) {
+        selectEstado.value = proy.Etapa;
+      } else {
+        selectEstado.value = '';
+      }
+      cargarSprintsEnModalTarea(selectProy.value);
+    };
+
+    if (idProyectoPreseleccionado) {
+      selectProy.value = idProyectoPreseleccionado;
+      sincronizarEstadoYSprints();
+    } else if (selectProy.options.length > 1) {
+      selectProy.selectedIndex = 1;
+      sincronizarEstadoYSprints();
+    }
+    selectProy.onchange = sincronizarEstadoYSprints;
+  }
+
+  function toggleRecordatorioTarea() {
+    const check = document.getElementById('tsk_crear_recordatorio');
+    const wrap  = document.getElementById('tsk_recordatorio_wrap');
+    if (!wrap || !check) return;
+
+    if (check.checked) {
+      wrap.classList.remove('hidden');
+    } else {
+      wrap.classList.add('hidden');
+      const f = document.getElementById('tsk_recordatorio_fecha');
+      const h = document.getElementById('tsk_recordatorio_hora');
+      if (f) f.value = '';
+      if (h) h.value = '';
+    }
+  }
+
+  function guardarTarea(event) {
+    event.preventDefault();
+
+    const btn = event.submitter || document.querySelector('#formTarea button[type="submit"]');
+    if (btn && btn.dataset.busy === '1') return;
+
+    const crearRecordatorio = document.getElementById('tsk_crear_recordatorio').checked;
+    const fechaRecordatorio = document.getElementById('tsk_recordatorio_fecha').value;
+    const horaRecordatorio  = document.getElementById('tsk_recordatorio_hora').value;
+
+    if (crearRecordatorio && (!fechaRecordatorio || !horaRecordatorio)) {
+      mostrarToast('error', 'Indica la fecha y la hora del recordatorio o desactiva la casilla.');
+      return;
+    }
+
+    const idSprint = document.getElementById('tsk_sprint') ? document.getElementById('tsk_sprint').value : '';
+    if (!idSprint) {
+      mostrarToast('error', 'Debes seleccionar un Sprint para la tarea.');
+      return;
+    }
+
+    const tarea = {
+      ID_Proyecto:             document.getElementById('tsk_proyecto').value,
+      Estado_Proyecto_Asignado: document.getElementById('tsk_estado_proyecto').value,
+      Nombre_Tarea:            document.getElementById('tsk_nombre').value,
+      Descripcion:             document.getElementById('tsk_descripcion').value,
+      Asignado_A:              document.getElementById('tsk_asignado').value,
+      // Fecha_Entrega ya NO se solicita al usuario. Se deriva automáticamente
+      // de la Fecha_Fin del Sprint seleccionado en el servidor.
+      Prioridad:               document.getElementById('tsk_prioridad').value,
+      Comentarios:             document.getElementById('tsk_comentarios').value,
+      Estado_Tarea:            'Pendiente',
+      ID_Sprint:               idSprint,
+      crearRecordatorio:       crearRecordatorio,
+      Fecha_Recordatorio:      fechaRecordatorio,
+      Hora_Recordatorio:       horaRecordatorio
+    };
+
+    bloquearBotonGuardar(btn, 'Guardando...');
+    bloquearModal('modalTarea');
+    mostrarLoader(true);
+    google.script.run
+      .withSuccessHandler(res => {
+        desbloquearBotonGuardar(btn);
+        desbloquearModal('modalTarea');
+        cerrarModal('modalTarea');
+        mostrarToast('success', res.mensaje);
+        cargarTodo();
+      })
+      .withFailureHandler(err => {
+        desbloquearBotonGuardar(btn);
+        desbloquearModal('modalTarea');
+        manejarError(err);
+      })
+      .crearTarea(tarea);
+  }
+
+  function eliminarTareaConfirm(id) {
+    if (!confirm('¿Eliminar esta tarea?')) return;
+    mostrarLoader(true);
+    google.script.run
+      .withSuccessHandler(res => {
+        mostrarToast('success', res.mensaje);
+        cargarTodo();
+      })
+      .withFailureHandler(manejarError)
+      .eliminarTarea(id);
+  }
+
+  // ============================================================
+  // UTILIDADES UI
+  // ============================================================
+  function cerrarModal(id) {
+    document.getElementById(id).classList.add('hidden');
+  }
+
+  function confirmarAccion(opciones) {
+    opciones = opciones || {};
+    const modal = document.getElementById('modalConfirmacion');
+
+    if (!modal) {
+      if (typeof opciones.onConfirmar === 'function') opciones.onConfirmar();
+      return;
+    }
+
+    document.getElementById('modalConfirmacionTitulo').textContent  = opciones.titulo  || 'Confirmar acción';
+    document.getElementById('modalConfirmacionMensaje').textContent = opciones.mensaje || '¿Deseas continuar?';
+
+    const btnCancelar = document.getElementById('modalConfirmacionCancelar');
+    let btnAceptar    = document.getElementById('modalConfirmacionAceptar');
+    btnAceptar.textContent = opciones.textoAceptar || 'Aceptar';
+
+    const nuevoAceptar = btnAceptar.cloneNode(true);
+    btnAceptar.parentNode.replaceChild(nuevoAceptar, btnAceptar);
+    btnAceptar = nuevoAceptar;
+
+    function cerrar() {
+      modal.classList.add('hidden');
+      document.removeEventListener('keydown', onKey);
+      modal.onclick = null;
+    }
+    function onKey(e) { if (e.key === 'Escape') cerrar(); }
+
+    btnAceptar.addEventListener('click', function () {
+      cerrar();
+      if (typeof opciones.onConfirmar === 'function') opciones.onConfirmar();
+    });
+    btnCancelar.onclick = cerrar;
+    modal.onclick = function (e) { if (e.target === modal) cerrar(); };
+    document.addEventListener('keydown', onKey);
+
+    modal.classList.remove('hidden');
+  }
+
+  function bloquearBotonGuardar(btn, textoOcupado) {
+    if (!btn) return;
+    btn.dataset.busy         = '1';
+    btn.dataset.textoOriginal = btn.innerHTML;
+    btn.disabled             = true;
+    btn.innerHTML            = '<i class="bi bi-hourglass-split"></i> ' + (textoOcupado || 'Guardando...');
+  }
+
+  function desbloquearBotonGuardar(btn) {
+    if (!btn) return;
+    btn.disabled = false;
+    if (btn.dataset.textoOriginal) btn.innerHTML = btn.dataset.textoOriginal;
+    delete btn.dataset.busy;
+    delete btn.dataset.textoOriginal;
+  }
+
+  /**
+   * Bloquea completamente un modal durante el guardado:
+   * - Deshabilita todos los inputs, selects, textareas y botones.
+   * - Agrega una capa visual semitransparente sobre el cuerpo del modal.
+   * - Impide el cierre por teclado (Escape) mientras está bloqueado.
+   *
+   * @param {string} idModal - ID del elemento modal a bloquear.
+   */
+  function bloquearModal(idModal) {
+    const modal = document.getElementById(idModal);
+    if (!modal) return;
+
+    // Marcar el modal como ocupado
+    modal.dataset.bloqueado = '1';
+
+    // Deshabilitar controles interactivos
+    const controles = modal.querySelectorAll('input, select, textarea, button');
+    controles.forEach(c => {
+      c.dataset.estadoPrevio = c.disabled ? '1' : '0';
+      c.disabled = true;
+    });
+
+    // Insertar overlay de "procesando" sobre el body del modal
+    const body = modal.querySelector('.modal-body');
+    if (body && !body.querySelector('.modal-lock-overlay')) {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-lock-overlay';
+      overlay.innerHTML =
+        '<div class="modal-lock-content">' +
+          '<div class="spinner" style="width:32px;height:32px;border-width:3px;margin:0 auto 10px;"></div>' +
+          '<p style="margin:0;font-size:0.88rem;font-weight:600;color:var(--text);">Guardando...</p>' +
+          '<p style="margin:4px 0 0;font-size:0.78rem;color:var(--muted);">Por favor, espera un momento.</p>' +
+        '</div>';
+      body.style.position = 'relative';
+      body.appendChild(overlay);
+    }
+
+    // Deshabilitar el botón de cierre (×)
+    const btnCerrar = modal.querySelector('.modal-close');
+    if (btnCerrar) {
+      btnCerrar.dataset.estadoPrevio = btnCerrar.disabled ? '1' : '0';
+      btnCerrar.disabled = true;
+    }
+  }
+
+  /**
+   * Desbloquea un modal previamente bloqueado con bloquearModal().
+   * Restaura todos los controles a su estado anterior.
+   *
+   * @param {string} idModal - ID del elemento modal a desbloquear.
+   */
+  function desbloquearModal(idModal) {
+    const modal = document.getElementById(idModal);
+    if (!modal) return;
+
+    delete modal.dataset.bloqueado;
+
+    // Restaurar controles
+    const controles = modal.querySelectorAll('input, select, textarea, button');
+    controles.forEach(c => {
+      if (c.dataset.estadoPrevio !== undefined) {
+        c.disabled = c.dataset.estadoPrevio === '1';
+        delete c.dataset.estadoPrevio;
+      } else {
+        c.disabled = false;
+      }
+    });
+
+    // Remover overlay
+    const overlay = modal.querySelector('.modal-lock-overlay');
+    if (overlay) overlay.remove();
+  }
+
+  function mostrarLoader(mostrar) {
+    document.getElementById('loader').classList.toggle('hidden', !mostrar);
+  }
+
+  function mostrarToast(tipo, mensaje) {
+    const toast = document.createElement('div');
+    toast.className = 'toast ' + tipo;
+    toast.innerHTML = `<i class="bi bi-${tipo==='success'?'check-circle':tipo==='error'?'x-circle':'info-circle'}"></i> ${mensaje}`;
+    document.getElementById('toastContainer').appendChild(toast);
+    setTimeout(() => toast.remove(), 4000);
+  }
+
+  function manejarError(error) {
+    mostrarLoader(false);
+    mostrarToast('error', error.message || 'Error desconocido');
+    console.error(error);
+  }
+
+  // ============================================================
+  // MÓDULO DE REPORTES EXECUTIVE
+  // ============================================================
+  function inicializarReportes() {
+    // Poblar el selector de "Estado de tareas"
+    const selectEstadoTareas = document.getElementById('reporteEstadoTareas');
+    if (selectEstadoTareas && selectEstadoTareas.options.length <= 1) {
+      const opciones = [
+        { valor: '',            etiqueta: 'Todas las tareas' },
+        { valor: 'vigentes',    etiqueta: 'Pendientes y en curso' },
+        { valor: 'completadas', etiqueta: 'Completadas' }
+      ];
+      selectEstadoTareas.innerHTML = opciones.map(o =>
+        `<option value="${o.valor}">${o.etiqueta}</option>`
+      ).join('');
+    }
+  }
+
+  function generarReporte() {
+    const filtros = {
+      fechaCorte:          new Date().toISOString().split('T')[0],
+      empresaFiltro:       document.getElementById('reporteEmpresa').value,
+      estadoTareasFiltro:  document.getElementById('reporteEstadoTareas') ? document.getElementById('reporteEstadoTareas').value : '',
+      soloAtrasados:       document.getElementById('reporteTipo').value === 'atencion'
+    };
+
+    mostrarLoader(true);
+    google.script.run
+      .withSuccessHandler(reporte => {
+        renderizarReporte(reporte);
+        mostrarLoader(false);
+        mostrarToast('success', 'Reporte generado correctamente');
+      })
+      .withFailureHandler(manejarError)
+      .generarReporteSnapshot(filtros);
+  }
+
+  function renderizarReporte(r) {
+    const contenedor = document.getElementById('contenedorReporte');
+
+    contenedor.innerHTML = `
+      ${renderReporteEncabezado(r.metadata)}
+      ${renderReporteKPIs(r.kpis)}
+      ${renderReporteResumenSalud(r.kpis, r.detalleProyectos)}
+      ${renderReporteEmpresas(r.distribucionEmpresas)}
+      ${renderReporteObservaciones(r.observaciones)}
+      ${renderReporteAtencion(r.atencion)}
+      ${renderReporteDetalleProyectos(r.detalleProyectos)}
+      ${renderReportePie(r.metadata)}
+    `;
+
+    contenedor.classList.remove('hidden');
+    document.getElementById('reporteVacio').classList.add('hidden');
+    document.getElementById('btnImprimir').classList.remove('hidden');
+    contenedor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function renderReporteEncabezado(m) {
+    const fa = m.filtrosAplicados || {};
+    const etiquetaEstadoTareas = fa.estadoTareas === 'vigentes'   ? 'Pendientes y en curso'
+                               : fa.estadoTareas === 'completadas' ? 'Completadas'
+                               : 'Todas';
+    const tieneFiltros = fa.empresa !== 'Todas' || fa.soloAtrasados || (fa.estadoTareas && fa.estadoTareas !== '' && fa.estadoTareas !== 'todas');
+    return `
+      <div class="reporte-encabezado">
+        <h1 class="reporte-titulo"><i class="bi bi-clipboard-data"></i> Reporte de Seguimiento de Iniciativas</h1>
+        <p class="reporte-meta">
+          <strong>Fecha de corte:</strong> ${m.fechaCorte} ·
+          <strong>Generado:</strong> ${m.fechaGeneracion} ·
+          <strong>Por:</strong> ${escapeHtml(m.generadoPor)}
+        </p>
+        ${tieneFiltros ? `
+          <p class="reporte-meta">
+            <strong>Filtros:</strong>
+            ${fa.empresa !== 'Todas' ? `Empresa: ${escapeHtml(fa.empresa)} · ` : ''}
+            ${fa.estadoTareas && fa.estadoTareas !== '' && fa.estadoTareas !== 'todas' ? `Estado de tareas: ${escapeHtml(etiquetaEstadoTareas)} · ` : ''}
+            ${fa.soloAtrasados ? 'Solo proyectos críticos' : ''}
+          </p>
+        ` : ''}
+      </div>
+    `;
+  }
+
+  function renderReporteKPIs(k) {
+    return `
+      <div class="reporte-seccion">
+        <h3><i class="bi bi-graph-up-arrow"></i> Resumen Ejecutivo</h3>
+        <div class="reporte-kpi-grid">
+          <div class="reporte-kpi">
+            <p class="reporte-kpi-label">Total Proyectos</p>
+            <p class="reporte-kpi-valor">${k.totalProyectos}</p>
+            <p style="font-size:0.74rem;color:var(--muted);margin-top:4px;">Iniciativas visibles (excl. cerradas)</p>
+          </div>
+          <div class="reporte-kpi success">
+            <p class="reporte-kpi-label">Total en Curso</p>
+            <p class="reporte-kpi-valor">${k.proyectosActivos}</p>
+            <p style="font-size:0.74rem;color:var(--muted);margin-top:4px;">Fases 1 al 5 activas (OPI 2026)</p>
+          </div>
+          <div class="reporte-kpi">
+            <p class="reporte-kpi-label">Finalizados</p>
+            <p class="reporte-kpi-valor">${k.proyectosFinalizados}</p>
+            <p style="font-size:0.74rem;color:var(--muted);margin-top:4px;">Iniciativas cerradas</p>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderReporteResumenSalud(k, detalleProyectos) {
+    const total    = k.totalProyectos || 0;
+    const enRiesgo = k.proyectosAtrasados + k.proyectosBloqueados;
+    const sanos    = Math.max(total - enRiesgo - k.proyectosFinalizados, 0);
+
+    let nivel, etiqueta, mensaje;
+    const pctRiesgo = total > 0 ? (enRiesgo / total) * 100 : 0;
+
+    if (total === 0) {
+      nivel = 'info'; etiqueta = 'Sin datos';
+      mensaje = 'No hay iniciativas dentro del alcance seleccionado.';
+    } else if (pctRiesgo === 0) {
+      nivel = 'success'; etiqueta = 'Portafolio saludable';
+      mensaje = 'Ninguna iniciativa está atrasada ni bloqueada. El portafolio avanza según lo previsto.';
+    } else if (pctRiesgo <= 25) {
+      nivel = 'warning'; etiqueta = 'Atención puntual';
+      mensaje = `${enRiesgo} de ${total} iniciativa(s) requieren seguimiento. El portafolio está mayormente bajo control.`;
+    } else {
+      nivel = 'danger'; etiqueta = 'Riesgo elevado';
+      mensaje = `${enRiesgo} de ${total} iniciativa(s) (${Math.round(pctRiesgo)}%) están atrasadas o bloqueadas. Se recomienda priorizar acciones correctivas.`;
+    }
+
+    const topAtrasos = (detalleProyectos || [])
+      .filter(p => p.Desviacion !== null && p.Desviacion < 0)
+      .sort((a, b) => (a.Desviacion || 0) - (b.Desviacion || 0))
+      .slice(0, 3);
+
+    return `
+      <div class="reporte-seccion">
+        <h3><i class="bi bi-heart-pulse"></i> Salud del Portafolio</h3>
+        <div class="reporte-salud-wrap">
+          <div class="reporte-salud-semaforo ${nivel}">
+            <span class="reporte-salud-etiqueta">${etiqueta}</span>
+            <p class="reporte-salud-mensaje">${mensaje}</p>
+          </div>
+          <div class="reporte-salud-mini">
+            <div class="reporte-salud-mini-item">
+              <span class="reporte-salud-mini-num" style="color:#10b981">${sanos}</span>
+              <span class="reporte-salud-mini-lbl">En tiempo</span>
+            </div>
+            <div class="reporte-salud-mini-item">
+              <span class="reporte-salud-mini-num" style="color:#ef4444">${enRiesgo}</span>
+              <span class="reporte-salud-mini-lbl">En riesgo</span>
+            </div>
+            <div class="reporte-salud-mini-item">
+              <span class="reporte-salud-mini-num" style="color:#6b7280">${k.proyectosFinalizados}</span>
+              <span class="reporte-salud-mini-lbl">Finalizados</span>
+            </div>
+          </div>
+        </div>
+        ${topAtrasos.length > 0 ? `
+          <div class="reporte-top-atrasos">
+            <p class="reporte-top-atrasos-titulo"><i class="bi bi-bullseye"></i> Foco prioritario — mayores desviaciones:</p>
+            ${topAtrasos.map(p => `
+              <div class="reporte-top-atraso-row">
+                <span class="reporte-top-atraso-nombre">${escapeHtml(p.Nombre)}</span>
+                <span class="reporte-top-atraso-badge">${p.Desviacion}%</span>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }
+
+  function renderReporteEmpresas(distribucion) {
+    if (!distribucion || distribucion.length === 0) return '';
+    return `
+      <div class="reporte-seccion">
+        <h3><i class="bi bi-building"></i> Distribución por Empresa</h3>
+        <table class="reporte-tabla">
+          <thead>
+            <tr>
+              <th>Empresa</th>
+              <th style="text-align:center;">Total</th>
+              <th style="text-align:center;">Activos</th>
+              <th style="text-align:center;">Finalizados</th>
+              <th style="text-align:center;">Atrasados</th>
+              <th style="text-align:center;">Progreso Prom.</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${distribucion.map(d => `
+              <tr>
+                <td><strong>${escapeHtml(d.empresa)}</strong></td>
+                <td style="text-align:center;">${d.total}</td>
+                <td style="text-align:center; color:#2563eb;">${d.activos}</td>
+                <td style="text-align:center; color:#059669;">${d.finalizados}</td>
+                <td style="text-align:center; color:${d.atrasados > 0 ? '#dc2626' : '#6b7280'}; font-weight:${d.atrasados > 0 ? '700' : '400'};">${d.atrasados}</td>
+                <td style="text-align:center;">
+                  <div class="reporte-mini-progreso">
+                    <div class="reporte-mini-progreso-fill" style="width:${d.progresoPromedio}%"></div>
+                  </div>
+                  <span class="reporte-mini-progreso-txt">${d.progresoPromedio}%</span>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderReporteObservaciones(observaciones) {
+    return `
+      <div class="reporte-seccion">
+        <h3><i class="bi bi-lightbulb"></i> Observaciones Automáticas</h3>
+        ${observaciones.map(o => `
+          <div class="reporte-observacion ${o.tipo}">
+            ${escapeHtml(o.texto)}
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function renderReporteAtencion(proyectos) {
+    if (proyectos.length === 0) {
+      return `
+        <div class="reporte-seccion">
+          <h3><i class="bi bi-exclamation-triangle"></i> Iniciativas que requieren atención</h3>
+          <p class="text-gray-500 italic">No hay proyectos en estado crítico.</p>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="reporte-seccion">
+        <h3><i class="bi bi-exclamation-triangle"></i> Iniciativas que requieren atención (${proyectos.length})</h3>
+        ${proyectos.map(p => {
+          const claseEstado = p.Etapa === 'Bloqueado' ? 'bloqueado' : 'atrasado';
+          return `
+            <div class="reporte-proyecto-card ${claseEstado}">
+              <div style="display:flex; justify-content:space-between; align-items:start;">
+                <div>
+                  <strong>${escapeHtml(p.Nombre)}</strong>
+                  <span style="color:#6b7280; font-size:0.85em;">(${p.ID_Proyecto})</span>
+                </div>
+                <span style="font-size:0.85em; font-weight:600;">
+                  ${p.Etapa === 'Bloqueado' ? '<i class="bi bi-pause-circle-fill"></i> BLOQUEADO' : ''}
+                  ${p.Estado_Comparacion === 'atrasado' ? `<i class="bi bi-arrow-down-right"></i> Atrasado ${p.Desviacion}%` : ''}
+                  ${p.tareasVencidas > 0 ? `<span class="reporte-pill-vencidas"><i class="bi bi-alarm"></i> ${p.tareasVencidas} vencida(s)</span>` : ''}
+                </span>
+              </div>
+              <p style="margin:4px 0 0; font-size:0.875rem; color:#4b5563;">
+                <strong>Líder:</strong> ${escapeHtml(p.Lider)} ·
+                <strong>Aliado:</strong> ${escapeHtml(p.Startup || 'Por definir')} ·
+                <strong>Real:</strong> ${p.Progreso}% ·
+                <strong>Esperado:</strong> ${p.Progreso_Esperado || 'N/A'}%
+              </p>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  // ============================================================
+  // REPORTES — ACORDEÓN: estado del panel abierto actualmente
+  // ============================================================
+  var _reporteAcordeonAbierto = null;
+
+  /**
+   * Alterna la visibilidad del panel de detalle de un proyecto en el acordeón.
+   * Solo puede haber un proyecto expandido al mismo tiempo:
+   *   - Si el panel clickeado ya está abierto, se cierra.
+   *   - Si hay otro panel abierto, se cierra antes de abrir el nuevo.
+   *
+   * @param {string} idProyecto - ID_Proyecto del panel a alternar.
+   */
+  function toggleAcordeonReporte(idProyecto) {
+    var panelActual  = document.getElementById('acordeon-panel-' + idProyecto);
+    var iconoActual  = document.getElementById('acordeon-icono-' + idProyecto);
+    var headerActual = document.getElementById('acordeon-header-' + idProyecto);
+    if (!panelActual) return;
+
+    var estaAbierto = panelActual.style.display !== 'none';
+
+    // Cerrar el panel previamente abierto (si es distinto al clickeado)
+    if (_reporteAcordeonAbierto && _reporteAcordeonAbierto !== idProyecto) {
+      var panelPrev  = document.getElementById('acordeon-panel-' + _reporteAcordeonAbierto);
+      var iconoPrev  = document.getElementById('acordeon-icono-' + _reporteAcordeonAbierto);
+      var headerPrev = document.getElementById('acordeon-header-' + _reporteAcordeonAbierto);
+      if (panelPrev)  panelPrev.style.display  = 'none';
+      if (iconoPrev)  iconoPrev.style.transform = 'rotate(0deg)';
+      if (headerPrev) headerPrev.setAttribute('aria-expanded', 'false');
+    }
+
+    // Alternar el panel clickeado
+    if (estaAbierto) {
+      panelActual.style.display  = 'none';
+      if (iconoActual)  iconoActual.style.transform = 'rotate(0deg)';
+      if (headerActual) headerActual.setAttribute('aria-expanded', 'false');
+      _reporteAcordeonAbierto = null;
+    } else {
+      panelActual.style.display  = 'block';
+      if (iconoActual)  iconoActual.style.transform = 'rotate(180deg)';
+      if (headerActual) headerActual.setAttribute('aria-expanded', 'true');
+      _reporteAcordeonAbierto = idProyecto;
+    }
+  }
+
+  function renderReporteDetalleProyectos(proyectos) {
+    if (proyectos.length === 0) return '';
+
+    // Reiniciar estado del acordeón cada vez que se renderiza el detalle
+    _reporteAcordeonAbierto = null;
+
+    return `
+      <div class="reporte-seccion">
+        <h3><i class="bi bi-card-list"></i> Detalle por Proyecto</h3>
+        ${proyectos.map(p => {
+          const claseEstado = p.Estado_Comparacion === 'atrasado'   ? 'atrasado'  :
+                              p.Etapa === 'Bloqueado'               ? 'bloqueado' :
+                              p.Estado_Comparacion === 'adelantado'  ? 'adelantado': '';
+
+          const rt      = p.resumenTareas || { total: 0, pendientes: 0, enProceso: 0, completadas: 0 };
+          const pctComp = rt.total > 0 ? Math.round((rt.completadas / rt.total) * 100) : 0;
+
+          const idSafe = p.ID_Proyecto.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+          // ── Contenido del panel (idéntico al detalle original) ──
+          const contenidoPanel = `
+            <div style="padding:0.75rem 0 0.25rem;">
+              <div style="font-size:0.875rem; color:#4b5563; margin-bottom:0.5rem;">
+                <strong>Líder:</strong> ${escapeHtml(p.Lider)} ·
+                <strong>Empresa:</strong> ${p.Empresa} ·
+                <strong>Startup / Aliado:</strong> <span class="text-indigo-600 font-bold">${escapeHtml(p.Startup || 'N/A')}</span> ·
+                <strong>Etapa:</strong> ${p.Etapa}
+              </div>
+              ${p.Aliado_URL ? `
+              <div style="font-size:0.875rem; color:#4b5563; margin-bottom:0.5rem;">
+                <strong>Web del aliado:</strong> <a href="${escapeHtml(p.Aliado_URL)}" target="_blank" rel="noopener">${escapeHtml(p.Aliado_URL)}</a>
+              </div>` : ''}
+              <div style="font-size:0.875rem; margin-bottom:0.5rem;">
+                <strong>Progreso real:</strong> ${p.Progreso}% / <strong>esperado:</strong> ${p.Progreso_Esperado !== null ? p.Progreso_Esperado + '%' : 'N/A'}
+              </div>
+              ${p.sprints && p.sprints.length > 0
+                ? renderReporteSprintsProyecto(p.sprints)
+                : (p.tareas && p.tareas.length > 0 ? `
+                    <details style="margin-top:0.5rem;">
+                      <summary style="cursor:pointer; font-size:0.8125rem; color:#4f46e5;">Ver tareas (${p.tareas.length})</summary>
+                      <table class="reporte-tabla" style="margin-top:0.5rem;">
+                        <thead>
+                          <tr><th>Tarea</th><th>Último comentario</th><th>Entrega</th><th>Estado</th></tr>
+                        </thead>
+                        <tbody>
+                          ${p.tareas.map(t => `
+                            <tr><td>${escapeHtml(t.Nombre_Tarea)}</td><td>${escapeHtml(obtenerUltimoComentario(t.Comentarios))}</td><td>${t.Fecha_Entrega || '—'}</td><td>${t.Estado_Tarea}</td></tr>
+                          `).join('')}
+                        </tbody>
+                      </table>
+                    </details>
+                  ` : '')
+              }
+            </div>
+          `;
+
+          return `
+            <div class="reporte-proyecto-card ${claseEstado}" style="padding:0; overflow:hidden;">
+              <!-- ── Cabecera del acordeón (siempre visible) ── -->
+              <button
+                id="acordeon-header-${idSafe}"
+                type="button"
+                aria-expanded="false"
+                aria-controls="acordeon-panel-${idSafe}"
+                onclick="toggleAcordeonReporte('${idSafe}')"
+                style="width:100%; background:transparent; border:none; cursor:pointer; padding:0.75rem 1rem;
+                       display:flex; justify-content:space-between; align-items:center; text-align:left;">
+                <strong style="font-size:1rem; color:var(--text);">${escapeHtml(p.Nombre)}</strong>
+                <span style="display:inline-flex; align-items:center; gap:8px; flex-shrink:0;">
+                  <span style="font-size:0.8em; background:#fff; padding:2px 8px; border-radius:4px; border:1px solid #d1d5db;">
+                    ${p.ID_Proyecto}
+                  </span>
+                  <i id="acordeon-icono-${idSafe}"
+                     class="bi bi-chevron-down"
+                     style="font-size:1rem; color:var(--brand-600); transition:transform 0.25s ease; transform:rotate(0deg);">
+                  </i>
+                </span>
+              </button>
+              <!-- ── Panel de detalle (oculto por defecto) ── -->
+              <div
+                id="acordeon-panel-${idSafe}"
+                role="region"
+                aria-labelledby="acordeon-header-${idSafe}"
+                style="display:none; padding:0 1rem 0.75rem;">
+                ${contenidoPanel}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  function renderReporteCargaPersona(carga) {
+    if (carga.length === 0) return '';
+
+    const maxProyectos = Math.max(...carga.map(c => c.total), 1);
+
+    return `
+      <div class="reporte-seccion">
+        <h3><i class="bi bi-people"></i> Análisis de Carga por Persona (Proyectos)</h3>
+        <table class="reporte-tabla">
+          <thead>
+            <tr>
+              <th>Persona (Líder)</th>
+              <th style="text-align:center;">Total Proyectos</th>
+              <th style="text-align:center;">En Curso</th>
+              <th style="text-align:center;">Finalizados</th>
+              <th style="text-align:center;">Atrasados</th>
+              <th style="text-align:center;">Progreso Prom.</th>
+              <th style="min-width:120px;">Carga</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${carga.map(c => {
+              const anchoBarra  = Math.round((c.total / maxProyectos) * 100);
+              const sobrecargado = c.total >= 5;
+              return `
+              <tr>
+                <td><strong style="text-transform:capitalize;">${escapeHtml(c.persona)}</strong></td>
+                <td style="text-align:center;">${c.total}</td>
+                <td style="text-align:center; color:#2563eb;">${c.enCurso}</td>
+                <td style="text-align:center; color:#059669;">${c.finalizados}</td>
+                <td style="text-align:center; color:${c.atrasados > 0 ? '#dc2626' : '#9ca3af'}; font-weight:${c.atrasados > 0 ? '700' : '400'};">${c.atrasados}</td>
+                <td style="text-align:center;">
+                  <div class="reporte-mini-progreso">
+                    <div class="reporte-mini-progreso-fill" style="width:${c.progresoPromedio}%"></div>
+                  </div>
+                  <span class="reporte-mini-progreso-txt">${c.progresoPromedio}%</span>
+                </td>
+                <td>
+                  <div class="reporte-carga-barra">
+                    <div class="reporte-carga-barra-fill ${sobrecargado ? 'sobrecarga' : ''}" style="width:${anchoBarra}%"></div>
+                  </div>
+                  <span class="reporte-carga-num">${c.total} proyecto(s)${sobrecargado ? ' <i class="bi bi-exclamation-triangle-fill"></i>' : ''}</span>
+                </td>
+              </tr>
+            `;
+            }).join('')}
+          </tbody>
+        </table>
+        <p class="reporte-nota-pie">Nota: la carga se mide por el número de proyectos liderados por cada persona. El <i class="bi bi-exclamation-triangle-fill" style="color:var(--warn)"></i> señala personas con 5 o más proyectos.</p>
+      </div>
+    `;
+  }
+
+  function renderReportePie(m) {
+    return `
+      <div style="margin-top:2rem; padding-top:1rem; border-top:1px solid #e5e7eb; font-size:0.75rem; color:#9ca3af; text-align:center;">
+        Reporte generado automáticamente el ${m.fechaGeneracion} por el Sistema de gestión de Iniciativas de aceleración.
+      </div>
+    `;
+  }
+
+  // ============================================================
+  // SPRINTS — GESTIÓN
+  // ============================================================
+
+  /**
+   * Abre el modal para crear un nuevo Sprint.
+   * Detecta el proyecto seleccionado en el modal de tarea (si está abierto)
+   * para pre-asignarlo automáticamente.
+   */
+  function abrirModalNuevoSprint() {
+    const selectProy = document.getElementById('tsk_proyecto');
+    const idProyecto = selectProy ? selectProy.value : '';
+
+    document.getElementById('spr_id_proyecto').value = idProyecto;
+    document.getElementById('spr_nombre').value      = '';
+    document.getElementById('spr_descripcion').value = '';
+    document.getElementById('spr_fecha_inicio').value = '';
+    document.getElementById('spr_fecha_fin').value    = '';
+
+    const btn = document.getElementById('btnGuardarSprint');
+    if (btn) desbloquearBotonGuardar(btn);
+
+    document.getElementById('modalNuevoSprint').classList.remove('hidden');
+    setTimeout(() => document.getElementById('spr_nombre').focus(), 100);
+  }
+
+  /**
+   * Guarda el nuevo Sprint llamando al servidor y recarga los sprints en memoria.
+   */
+  function guardarNuevoSprint() {
+    const idProyecto = document.getElementById('spr_id_proyecto').value.trim();
+    const nombre     = document.getElementById('spr_nombre').value.trim();
+    const descripcion = document.getElementById('spr_descripcion').value.trim();
+    const fechaInicio = document.getElementById('spr_fecha_inicio').value;
+    const fechaFin    = document.getElementById('spr_fecha_fin').value;
+
+    if (!idProyecto) {
+      mostrarToast('error', 'No se puede determinar el proyecto. Cierra este modal y selecciona un proyecto primero.');
+      return;
+    }
+    if (!nombre || nombre.length < 2) {
+      mostrarToast('error', 'El nombre del Sprint debe tener al menos 2 caracteres.');
+      document.getElementById('spr_nombre').focus();
+      return;
+    }
+
+    const btn = document.getElementById('btnGuardarSprint');
+    bloquearBotonGuardar(btn, 'Creando...');
+
+    google.script.run
+      .withSuccessHandler(res => {
+        desbloquearBotonGuardar(btn);
+        cerrarModal('modalNuevoSprint');
+        mostrarToast('success', res.mensaje);
+
+        // Recargar sprints del servidor y actualizar el selector del modal de tarea
+        google.script.run
+          .withSuccessHandler(sprints => {
+            estado.sprints = sprints || [];
+            cargarSprintsEnModalTarea(idProyecto);
+            // Pre-seleccionar el sprint recién creado
+            const selectSprint = document.getElementById('tsk_sprint');
+            if (selectSprint && res.id) {
+              selectSprint.value = res.id;
+              // Actualizar la información de fecha de entrega para el sprint seleccionado
+              const optSel = selectSprint.options[selectSprint.selectedIndex];
+              actualizarFechaEntregaInfo(optSel ? (optSel.dataset.fechaFin || null) : null);
+            }
+          })
+          .withFailureHandler(() => {})
+          .obtenerSprints('');
+      })
+      .withFailureHandler(err => {
+        desbloquearBotonGuardar(btn);
+        manejarError(err);
+      })
+      .crearSprint({
+        ID_Proyecto:  idProyecto,
+        Nombre:       nombre,
+        Descripcion:  descripcion,
+        Fecha_Inicio: fechaInicio,
+        Fecha_Fin:    fechaFin
+      });
+  }
+
+  // ============================================================
+  // REPORTES — SPRINTS: renderizado del detalle por Sprint
+  // ============================================================
+
+  /**
+   * Renderiza el bloque de Sprints de un proyecto en el reporte.
+   * Se llama desde renderReporteDetalleProyectos() para cada proyecto.
+   *
+   * @param {Array} sprints - Array de sprints con sus tareas y métricas
+   * @return {string} HTML del bloque de Sprints
+   */
+  function renderReporteSprintsProyecto(sprints) {
+    if (!sprints || sprints.length === 0) return '';
+
+    const sprintsHtml = sprints.map(sprint => {
+      const pct = sprint.pctAvance || 0;
+      const colorBarra = pct >= 80 ? '#10b981' : pct >= 40 ? '#3b82f6' : '#f59e0b';
+      const fechas = sprint.Fecha_Inicio && sprint.Fecha_Fin
+        ? `<span style="font-size:0.78rem;color:var(--muted);margin-left:8px;">${sprint.Fecha_Inicio} → ${sprint.Fecha_Fin}</span>`
+        : '';
+
+      return `
+        <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div>
+              <strong style="font-size:0.9rem;color:var(--text);">
+                <i class="bi bi-lightning-charge" style="color:var(--brand-600);"></i>
+                ${escapeHtml(sprint.Nombre)}
+              </strong>
+              ${fechas}
+            </div>
+            <span style="font-size:0.78rem;font-weight:700;color:var(--brand-600);">${pct}% completado</span>
+          </div>
+          <div style="height:8px;background:#ebe8f4;border-radius:999px;overflow:hidden;margin-bottom:10px;">
+            <div style="height:100%;width:${pct}%;background:${colorBarra};border-radius:999px;transition:width 0.5s;"></div>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+            <span class="reporte-chip chip-total">Total: ${sprint.total}</span>
+            <span class="reporte-chip chip-comp">Completadas: ${sprint.completadas}</span>
+            <span class="reporte-chip chip-proc">En proceso: ${sprint.enProceso}</span>
+            <span class="reporte-chip chip-pend">Pendientes: ${sprint.pendientes}</span>
+          </div>
+          ${sprint.tareas && sprint.tareas.length > 0 ? `
+            <details style="margin-top:6px;">
+              <summary style="cursor:pointer;font-size:0.79rem;color:var(--brand-600);">
+                Ver tareas de este Sprint (${sprint.tareas.length})
+              </summary>
+              <table class="reporte-tabla" style="margin-top:8px;">
+                <thead>
+                  <tr>
+                    <th>Tarea</th><th>Último comentario</th><th>Entrega</th><th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${sprint.tareas.map(t => `
+                    <tr>
+                      <td>${escapeHtml(t.Nombre_Tarea || '')}</td>
+                      <td>${escapeHtml(obtenerUltimoComentario(t.Comentarios))}</td>
+                      <td>${t.Fecha_Entrega || '—'}</td>
+                      <td>${escapeHtml(t.Estado_Tarea || '')}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </details>
+          ` : '<p style="font-size:0.79rem;color:var(--muted);margin:0;">Sin tareas en este Sprint.</p>'}
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div style="margin-top:14px;">
+        <p style="font-size:0.85rem;font-weight:700;color:var(--text);margin:0 0 10px;display:flex;align-items:center;gap:7px;">
+          <i class="bi bi-lightning-charge" style="color:var(--brand-600);"></i>
+          Sprints de trabajo (${sprints.length})
+        </p>
+        ${sprintsHtml}
+      </div>
+    `;
+  }
+
+  function imprimirReporte() {
+    // Abrir todos los <details> para que el PDF los incluya completos
+    const detalles       = Array.prototype.slice.call(document.querySelectorAll('#contenedorReporte details'));
+    const estadosPrevios = detalles.map(function (d) { return d.open; });
+    detalles.forEach(function (d) { d.open = true; });
+
+    // Expandir todos los paneles del acordeón de detalle por proyecto
+    const acordeonPaneles = Array.prototype.slice.call(document.querySelectorAll('#contenedorReporte [id^="acordeon-panel-"]'));
+    const acordeonEstados = acordeonPaneles.map(function (p) { return p.style.display; });
+    const acordeonIconos  = Array.prototype.slice.call(document.querySelectorAll('#contenedorReporte [id^="acordeon-icono-"]'));
+    acordeonPaneles.forEach(function (p) { p.style.display = 'block'; });
+    acordeonIconos.forEach(function (i) { i.style.transform = 'rotate(180deg)'; });
+
+    // Generar nombre de archivo con marca de tiempo: [OPI Reporte] AAAAMMDD_HHMMSS.pdf
+    var ahora      = new Date();
+    var yyyy       = ahora.getFullYear();
+    var MM         = String(ahora.getMonth() + 1).padStart(2, '0');
+    var dd         = String(ahora.getDate()).padStart(2, '0');
+    var HH         = String(ahora.getHours()).padStart(2, '0');
+    var mm         = String(ahora.getMinutes()).padStart(2, '0');
+    var ss         = String(ahora.getSeconds()).padStart(2, '0');
+    var nombreArchivo = '[OPI Reporte] ' + yyyy + MM + dd + '_' + HH + mm + ss + '.pdf';
+
+    var elemento = document.getElementById('contenedorReporte');
+
+    var opciones = {
+      margin:       [10, 10, 10, 10],
+      filename:     nombreArchivo,
+      image:        { type: 'jpeg', quality: 0.98 },
+      html2canvas:  { scale: 2, useCORS: true, logging: false },
+      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak:    { mode: ['avoid-all', 'css', 'legacy'] }
+    };
+
+    mostrarLoader(true);
+
+    html2pdf()
+      .set(opciones)
+      .from(elemento)
+      .save()
+      .then(function () {
+        // Restaurar estado original de los <details>
+        detalles.forEach(function (d, i) { d.open = estadosPrevios[i]; });
+        // Restaurar estado original de los paneles del acordeón
+        acordeonPaneles.forEach(function (p, i) { p.style.display = acordeonEstados[i]; });
+        acordeonIconos.forEach(function (ico, i) {
+          ico.style.transform = acordeonEstados[i] === 'block' ? 'rotate(180deg)' : 'rotate(0deg)';
+        });
+        mostrarLoader(false);
+        mostrarToast('success', 'PDF generado: ' + nombreArchivo);
+      })
+      .catch(function (err) {
+        detalles.forEach(function (d, i) { d.open = estadosPrevios[i]; });
+        // Restaurar estado original de los paneles del acordeón
+        acordeonPaneles.forEach(function (p, i) { p.style.display = acordeonEstados[i]; });
+        acordeonIconos.forEach(function (ico, i) {
+          ico.style.transform = acordeonEstados[i] === 'block' ? 'rotate(180deg)' : 'rotate(0deg)';
+        });
+        mostrarLoader(false);
+        mostrarToast('error', 'No se pudo generar el PDF. Intenta de nuevo.');
+        console.error('html2pdf error:', err);
+      });
+  }
+</script>

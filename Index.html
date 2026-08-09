@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>[VP de Innovación] Aceleracción</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Remapeo de tema (solo presentación): índigo/púrpura → violeta Hostinger,
+    // y tipografía por defecto a DM Sans. No altera ninguna lógica.
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['DM Sans', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif']
+          },
+          colors: {
+            indigo: {
+              50:'#f4f1fe',100:'#e7e0fc',200:'#d4c7f9',300:'#b9a3f4',400:'#9b78ee',
+              500:'#8359e9',600:'#673de6',700:'#4a25c2',800:'#3a1f8a',900:'#271554'
+            },
+            purple: {
+              50:'#faf3fe',100:'#f3e1fc',200:'#e9c7f8',300:'#d99bf0',400:'#c46fe6',
+              500:'#a93fd6',600:'#9333ea',700:'#7a26c4',800:'#641f9f',900:'#4a1574'
+            }
+          }
+        }
+      }
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+
+  <?!= include('Estilos'); ?>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+</head>
+<body>
+
+  <nav class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="brand-mark"><i class="bi bi-kanban"></i></div>
+        <div class="brand-titles">
+          <div class="brand-eyebrow">VP de Innovación · Open Innovation</div>
+          <div class="brand-title">Iniciativas de Aceleración</div>
+        </div>
+      </div>
+      <div class="nav-links">
+        <button onclick="cambiarVista('inicio')" class="nav-btn" data-vista="inicio"><i class="bi bi-house-door"></i> Inicio</button>
+        <button onclick="cambiarVista('dashboard')" class="nav-btn" data-vista="dashboard"><i class="bi bi-speedometer2"></i> Dashboard</button>
+        <button onclick="cambiarVista('proyectos')" class="nav-btn" data-vista="proyectos"><i class="bi bi-folder"></i> Iniciativas</button>
+        <button onclick="cambiarVista('tareas')" class="nav-btn" data-vista="tareas"><i class="bi bi-list-task"></i> Tareas</button>
+        <button onclick="cambiarVista('reportes')" class="nav-btn" data-vista="reportes"><i class="bi bi-file-earmark-text"></i> Reportes</button>
+      </div>
+      <div class="nav-right">
+        <div class="user-info" id="userInfo">
+          <span class="user-email" id="userEmail"></span>
+          <span class="user-avatar" id="userAvatar">?</span>
+        </div>
+        <button class="nav-burger" onclick="document.getElementById('mobileMenu').classList.toggle('hidden')"><i class="bi bi-list"></i></button>
+      </div>
+    </div>
+    <div id="mobileMenu" class="hidden">
+      <button onclick="cambiarVista('inicio')">Inicio</button>
+      <button onclick="cambiarVista('dashboard')">Dashboard</button>
+      <button onclick="cambiarVista('proyectos')">Iniciativas</button>
+      <button onclick="cambiarVista('tareas')">Tareas</button>
+      <button onclick="cambiarVista('reportes')">Reportes</button>
+    </div>
+  </nav>
+
+  <div id="toastContainer"></div>
+
+  <div id="loader" class="hidden loader-overlay">
+    <div class="loader-box">
+      <div class="spinner"></div>
+      <div style="text-align:center">
+        <span class="loader-title" style="display:block">Cargando...</span>
+        <span class="loader-sub" style="display:block">Por favor, espera...</span>
+      </div>
+    </div>
+  </div>
+
+  <main class="shell">
+
+    <!-- ===================== INICIO ===================== -->
+    <section id="vista-inicio" class="vista hidden">
+      <div class="acceso-hero">
+        <h2><span class="acceso-hero-ic"><i class="bi bi-house-door"></i></span> Bienvenido</h2>
+        <p>Accesos rápidos a tus archivos, formularios, herramientas y recursos clave.</p>
+      </div>
+
+      <div class="acceso-toolbar">
+        <div class="field" style="flex:1;min-width:240px">
+          <i class="bi bi-search field-ic"></i>
+          <input type="text" placeholder="Buscar por título, descripción o URL..."
+                 oninput="Inicio.buscar(this.value)" class="input has-ic">
+        </div>
+        <button onclick="Inicio.abrirModalAcceso()" class="btn btn-primary">
+          <i class="bi bi-plus-lg"></i> Nuevo acceso
+        </button>
+        <button onclick="Inicio.exportarAccesos()" class="btn btn-ghost btn-icon" title="Exportar accesos">
+          <i class="bi bi-download"></i>
+        </button>
+        <label class="btn btn-ghost btn-icon" title="Importar accesos" style="cursor:pointer">
+          <i class="bi bi-upload"></i>
+          <input type="file" accept="application/json" class="hidden" onchange="Inicio.importarAccesos(this)">
+        </label>
+      </div>
+
+      <div id="acceso-categorias-cont" class="chips-row"></div>
+      <div id="acceso-grid" class="acceso-grid"></div>
+    </section>
+
+    <!-- ===================== DASHBOARD ===================== -->
+    <section id="vista-dashboard" class="vista">
+      <div class="view-head">
+        <div class="view-head-titles">
+          <h2 class="view-title"><span class="vt-icon"><i class="bi bi-speedometer2"></i></span> Dashboard General</h2>
+          <p class="view-sub">Visión consolidada del portafolio de iniciativas</p>
+        </div>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi">
+          <div class="kpi-top"><span class="kpi-label">Total Iniciativas</span><span class="kpi-icon is-brand"><i class="bi bi-collection"></i></span></div>
+          <p id="kpi-total-proyectos" class="kpi-value">0</p>
+          <div class="kpi-foot"><i class="bi bi-graph-up"></i> Portafolio completo</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-top"><span class="kpi-label">Activos</span><span class="kpi-icon is-ok"><i class="bi bi-lightning-charge"></i></span></div>
+          <p id="kpi-proyectos-activos" class="kpi-value">0</p>
+          <div class="kpi-foot"><i class="bi bi-arrow-repeat"></i> En ejecución</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-top"><span class="kpi-label">Tareas Pendientes</span><span class="kpi-icon is-warn"><i class="bi bi-hourglass-split"></i></span></div>
+          <p id="kpi-tareas-pendientes" class="kpi-value">0</p>
+          <div class="kpi-foot"><i class="bi bi-clock"></i> Por atender</div>
+        </div>
+      </div>
+
+      <!-- Barra de filtro activo del Dashboard (multifiltro interactivo).
+           Aparece solo cuando hay un filtro aplicado al hacer clic en un gráfico. -->
+      <div id="dashboardFiltroBar" class="dashboard-filtro-bar hidden">
+        <span id="dashboardFiltroTexto" class="dashboard-filtro-texto"></span>
+        <button onclick="limpiarFiltroDashboard()" class="btn btn-ghost btn-sm">
+          <i class="bi bi-arrow-counterclockwise"></i> Volver / Limpiar filtros
+        </button>
+      </div>
+
+      <div style="display:grid;gap:20px">
+        <div class="chart-card">
+          <h3>Estado de Iniciativas</h3>
+          <p class="chart-sub">Distribución por fase del proceso de aceleración</p>
+          <div style="height:320px"><canvas id="chartProyectos"></canvas></div>
+        </div>
+
+        <div class="dashboard-charts-row">
+          <div class="chart-card">
+            <h3>Iniciativas por Empresa</h3>
+            <p class="chart-sub">Reparto del portafolio entre las compañías del grupo</p>
+            <div style="height:240px"><canvas id="chartEmpresas"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <h3>Tareas por Estado</h3>
+            <p class="chart-sub">Cantidad de tareas en Pendiente, En Proceso y Completada</p>
+            <div style="height:240px"><canvas id="chartTareasEstado"></canvas></div>
+          </div>
+        </div>
+
+        <!-- SOLUCIÓN 3: NUEVAS VISUALIZACIONES DEL DASHBOARD -->
+        <div class="dashboard-charts-row">
+          <div class="chart-card">
+            <h3>Estado de Gestión</h3>
+            <p class="chart-sub">Iniciativas por estado (Activo, En Pausa, Finalizado)</p>
+            <div style="height:240px"><canvas id="chartEstadosGestion"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <h3>Impacto de Iniciativas</h3>
+            <p class="chart-sub">Clasificación por tipo de impacto esperado</p>
+            <div style="height:240px"><canvas id="chartImpactos"></canvas></div>
+          </div>
+        </div>
+
+        <div class="dashboard-charts-row">
+          <div class="chart-card" style="grid-column: 1 / -1; max-width: 400px;">
+            <h3>Top Propietarios</h3>
+            <p class="chart-sub">Usuarios con más iniciativas a su cargo</p>
+            <div style="height:240px"><canvas id="chartPropietarios"></canvas></div>
+          </div>
+        </div>
+        <!-- FIN SOLUCIÓN 3 -->
+      </div>
+    </section>
+
+    <!-- ===================== INICIATIVAS ===================== -->
+    <section id="vista-proyectos" class="vista hidden">
+      <div class="view-head">
+        <div class="view-head-titles">
+          <h2 class="view-title"><span class="vt-icon"><i class="bi bi-folder"></i></span> Iniciativas</h2>
+          <p class="view-sub">Gestión y seguimiento de proyectos de aceleración</p>
+        </div>
+        <button onclick="abrirModalProyecto()" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Nuevo Proyecto</button>
+      </div>
+
+      <div class="filter-bar">
+        <div class="filter-head">
+          <span class="fh-title"><i class="bi bi-funnel"></i> Filtros</span>
+          <span id="contadorResultados" class="filter-count"></span>
+          <button onclick="limpiarFiltrosProyectos()" class="btn-clear"><i class="bi bi-x-circle"></i> Limpiar</button>
+        </div>
+
+        <div class="filter-grid cols-5">
+          <div class="field">
+            <i class="bi bi-search field-ic"></i>
+            <input type="text" id="filtroBusqueda" placeholder="Buscar nombre, ID, líder, aliado..."
+                   oninput="aplicarFiltrosProyectos()" class="input has-ic">
+          </div>
+
+          <select id="filtroEstado" onchange="aplicarFiltrosProyectos()" class="select">
+            <option value="">Todas las etapas</option>
+            <option value="1 DISCOVERY (Investigación)">1 DISCOVERY (Investigación)</option>
+            <option value="2 CONCEPT STUDIO (Conceptualización)">2 CONCEPT STUDIO (Conceptualización)</option>
+            <option value="3 PROJECT SETUP (Planificación)">3 PROJECT SETUP (Planificación)</option>
+            <option value="4 DELIVERY ENGINE (Implementación)">4 DELIVERY ENGINE (Implementación)</option>
+            <option value="5 LAUNCHPAD (G2M)">5 LAUNCHPAD (G2M)</option>
+            <option value="6 Iniciativa cerrada" id="filtroEstadoCerrada" class="hidden">6 Iniciativa cerrada</option>
+          </select>
+
+          <select id="filtroEmpresa" onchange="aplicarFiltrosProyectos()" class="select">
+            <option value="">Todas las empresas</option>
+            <option value="Davivienda">Davivienda</option>
+            <option value="Seguros Bolívar">Seguros Bolívar</option>
+            <option value="Constructora Bolívar">Constructora Bolívar</option>
+          </select>
+
+          <select id="filtroLider" onchange="aplicarFiltrosProyectos()" class="select">
+            <option value="">Todos los líderes</option>
+          </select>
+
+          <select id="filtroSituacion" onchange="aplicarFiltrosProyectos()" class="select">
+            <option value="">Todas las situaciones</option>
+            <option value="atrasado">Atrasados</option>
+            <option value="en_tiempo">En tiempo</option>
+            <option value="adelantado">Adelantados</option>
+            <option value="sin_fechas">Sin fechas</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <div class="table-scroll">
+          <table class="data">
+            <thead>
+              <tr>
+                <th>Nombre / Aliado</th>
+                <th>Empresa</th>
+                <th>Líder</th>
+                <th>Fechas etapa actual</th>
+                <th>Etapa</th>
+                <th>Estado</th>
+                <th>Progreso</th>
+                <th class="center">Tareas</th>
+                <th class="center">Carpeta</th>
+                <th class="center">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tablaProyectos"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== TAREAS ===================== -->
+    <section id="vista-tareas" class="vista hidden">
+      <div class="view-head">
+        <div class="view-head-titles">
+          <h2 class="view-title"><span class="vt-icon"><i class="bi bi-list-task"></i></span> Tareas</h2>
+          <p class="view-sub">Vista por estado · Pendiente · En proceso · Completada</p>
+        </div>
+        <button onclick="abrirModalTarea()" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Nueva Tarea</button>
+      </div>
+
+      <div class="filter-bar">
+        <div class="filter-head">
+          <span class="fh-title"><i class="bi bi-funnel"></i> Filtros de Tareas</span>
+          <button onclick="limpiarFiltrosTareas()" class="btn-clear" style="margin-left:auto"><i class="bi bi-x-circle"></i> Limpiar</button>
+        </div>
+
+        <div class="filter-grid cols-4">
+          <select id="filtroProyectoTarea" onchange="renderKanbanTareas()" class="select">
+            <option value="">Todos los proyectos</option>
+          </select>
+
+          <select id="filtroFaseTarea" onchange="renderKanbanTareas()" class="select">
+            <option value="">Todas las fases</option>
+            <option value="1 DISCOVERY (Investigación)">1 DISCOVERY (Investigación)</option>
+            <option value="2 CONCEPT STUDIO (Conceptualización)">2 CONCEPT STUDIO (Conceptualización)</option>
+            <option value="3 PROJECT SETUP (Planificación)">3 PROJECT SETUP (Planificación)</option>
+            <option value="4 DELIVERY ENGINE (Implementación)">4 DELIVERY ENGINE (Implementación)</option>
+            <option value="5 LAUNCHPAD (G2M)">5 LAUNCHPAD (G2M)</option>
+          </select>
+
+          <select id="filtroResponsableTarea" onchange="renderKanbanTareas()" class="select">
+            <option value="">Todos los responsables</option>
+          </select>
+
+          <select id="filtroVigenciaTarea" onchange="renderKanbanTareas()" class="select">
+            <option value="">Vigentes y atrasadas</option>
+            <option value="vigentes">Solo vigentes</option>
+            <option value="atrasadas">Solo atrasadas</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="kanban">
+        <div class="kanban-col col-pend">
+          <div class="kanban-col-head">
+            <span class="kanban-col-dot"></span>
+            <span class="kanban-col-title">Pendiente</span>
+            <span id="count-Pendiente" class="kanban-col-count">0</span>
+          </div>
+          <div id="col-Pendiente" class="kanban-cards"></div>
+        </div>
+        <div class="kanban-col col-proc">
+          <div class="kanban-col-head">
+            <span class="kanban-col-dot"></span>
+            <span class="kanban-col-title">En Proceso</span>
+            <span id="count-EnProceso" class="kanban-col-count">0</span>
+          </div>
+          <div id="col-EnProceso" class="kanban-cards"></div>
+        </div>
+        <div class="kanban-col col-done">
+          <div class="kanban-col-head">
+            <span class="kanban-col-dot"></span>
+            <span class="kanban-col-title">Completada</span>
+            <span id="count-Completada" class="kanban-col-count">0</span>
+          </div>
+          <div id="col-Completada" class="kanban-cards"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== REPORTES ===================== -->
+    <section id="vista-reportes" class="vista hidden">
+      <div class="view-head">
+        <div class="view-head-titles">
+          <h2 class="view-title"><span class="vt-icon"><i class="bi bi-file-earmark-text"></i></span> Reportes Ejecutivos</h2>
+          <p class="view-sub">Genera un snapshot del portafolio con la información actual</p>
+        </div>
+      </div>
+
+      <div class="card card-pad report-config no-print">
+        <div class="filter-head"><span class="fh-title"><i class="bi bi-sliders"></i> Configuración del reporte</span></div>
+
+        <div class="filter-grid cols-3" style="margin-bottom:18px">
+          <div>
+            <label class="label">Empresa</label>
+            <select id="reporteEmpresa" class="select">
+              <option value="">Todas las empresas</option>
+              <option value="Davivienda">Davivienda</option>
+              <option value="Seguros Bolívar">Seguros Bolívar</option>
+              <option value="Constructora Bolívar">Constructora Bolívar</option>
+            </select>
+          </div>
+          <div>
+            <label class="label">Estado de tareas</label>
+            <select id="reporteEstadoTareas" class="select">
+              <option value="">Todas las tareas</option>
+              <option value="vigentes">Pendientes y en curso</option>
+              <option value="completadas">Completadas</option>
+            </select>
+          </div>
+          <div>
+            <label class="label">Tipo de reporte</label>
+            <select id="reporteTipo" class="select">
+              <option value="completo">Completo (todas las iniciativas)</option>
+              <option value="atencion">Solo iniciativas que requieren atención</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-wrap:wrap;gap:10px">
+          <button onclick="generarReporte()" class="btn btn-primary"><i class="bi bi-file-earmark-text"></i> Generar reporte</button>
+          <button id="btnImprimir" onclick="imprimirReporte()" class="btn btn-success hidden"><i class="bi bi-printer"></i> Imprimir / Guardar PDF</button>
+        </div>
+      </div>
+
+      <div id="contenedorReporte" class="report-out hidden"></div>
+
+      <div id="reporteVacio" class="card card-pad empty-state">
+        <i class="bi bi-file-earmark-bar-graph"></i>
+        <p>Configura los parámetros arriba y haz clic en "Generar reporte".</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===================== MODAL PROYECTO ===================== -->
+  <div id="modalProyecto" class="hidden modal-overlay">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="tituloModalProyecto"><span class="mh-ic"><i class="bi bi-folder-plus"></i></span> Nuevo Proyecto</h3>
+        <button onclick="cerrarModal('modalProyecto')" class="modal-close">&times;</button>
+      </div>
+      <form id="formProyecto" onsubmit="guardarProyecto(event)" style="display:contents">
+        <div class="modal-body">
+          <input type="hidden" id="ini_id">
+          <div>
+            <label class="label">Nombre *</label>
+            <input type="text" id="ini_nombre" required class="input">
+          </div>
+          <div>
+            <label class="label">Descripción</label>
+            <textarea id="ini_descripcion" rows="3" class="textarea"></textarea>
+          </div>
+          <div>
+            <label class="label">Líder *</label>
+            <input type="text" id="ini_lider" required class="input">
+          </div>
+          <div>
+            <label class="label">Empresa *</label>
+            <select id="ini_empresa" required class="select">
+              <option value="">Seleccione una empresa...</option>
+              <option value="Davivienda">Davivienda</option>
+              <option value="Seguros Bolívar">Seguros Bolívar</option>
+              <option value="Constructora Bolívar">Constructora Bolívar</option>
+            </select>
+          </div>
+          <div>
+            <label class="label">Impacto *</label>
+            <select id="ini_impacto" required class="select">
+              <option value="">Seleccione el impacto...</option>
+              <option value="Ingresos">Ingresos</option>
+              <option value="Eficiencia">Eficiencia</option>
+              <option value="Experiencia">Experiencia</option>
+            </select>
+          </div>
+          <div>
+            <label class="label">Startup / Aliado de Innovación</label>
+            <input type="text" id="ini_startup" placeholder="Ej: FinTech Corp (opcional)" class="input"
+                   oninput="toggleAliadoUrlField()">
+          </div>
+          <div id="ini_aliado_url_wrap" class="hidden">
+            <label class="label">Página web del aliado</label>
+            <input type="url" id="ini_aliado_url" placeholder="https://www.aliado.com (opcional)" class="input">
+            <p class="hint">Opcional. Puedes continuar sin ingresar una URL.</p>
+          </div>
+          <div class="form-row">
+            <div>
+              <label class="label">Fecha inicio (primera etapa)</label>
+              <input type="date" id="ini_fecha_inicio" class="input">
+            </div>
+            <div>
+              <label class="label">Fecha fin (primera etapa)</label>
+              <input type="date" id="ini_fecha_fin" class="input">
+            </div>
+          </div>
+          <p class="hint" style="margin-top:-6px">Estas fechas corresponden a la primera etapa de la iniciativa y al Sprint inicial.</p>
+          <div>
+            <label class="label">Nombre del Sprint inicial</label>
+            <input type="text" id="ini_sprint_nombre" class="input" placeholder="Ej: Sprint 1, Sprint de arranque..." value="Sprint 1">
+            <p class="hint">Las tareas automáticas de la iniciativa quedarán agrupadas en este Sprint. Puedes personalizarlo.</p>
+          </div>
+          <div class="form-row">
+            <div>
+              <label class="label">Etapa</label>
+              <select id="ini_etapa" class="select">
+                <option>1 DISCOVERY (Investigación)</option>
+                <option>2 CONCEPT STUDIO (Conceptualización)</option>
+                <option>3 PROJECT SETUP (Planificación)</option>
+                <option>4 DELIVERY ENGINE (Implementación)</option>
+                <option>5 LAUNCHPAD (G2M)</option>
+              </select>
+            </div>
+            <div>
+              <label class="label">Estado</label>
+              <select id="ini_estado_gestion" class="select">
+                <option value="Activo">Activo</option>
+                <option value="En Pausa">En Pausa</option>
+                <option value="Finalizado">Finalizado</option>
+              </select>
+            </div>
+          </div>
+
+        </div>
+        <div class="modal-foot">
+          <button type="button" onclick="cerrarModal('modalProyecto')" class="btn btn-ghost">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===================== MODAL TAREA ===================== -->
+  <div id="modalTarea" class="hidden modal-overlay">
+    <div class="modal">
+      <div class="modal-head">
+        <h3><span class="mh-ic"><i class="bi bi-card-checklist"></i></span> Nueva Tarea</h3>
+        <button onclick="cerrarModal('modalTarea')" class="modal-close">&times;</button>
+      </div>
+      <form id="formTarea" onsubmit="guardarTarea(event)" style="display:contents">
+        <div class="modal-body">
+          <div>
+            <label class="label">Proyecto *</label>
+            <select id="tsk_proyecto" required class="select"></select>
+          </div>
+          <div>
+            <label class="label">Fase del proyecto al que se asigna *</label>
+            <select id="tsk_estado_proyecto" required class="select">
+              <option value="">Seleccione una fase...</option>
+              <option value="1 DISCOVERY (Investigación)">1 DISCOVERY (Investigación)</option>
+              <option value="2 CONCEPT STUDIO (Conceptualización)">2 CONCEPT STUDIO (Conceptualización)</option>
+              <option value="3 PROJECT SETUP (Planificación)">3 PROJECT SETUP (Planificación)</option>
+              <option value="4 DELIVERY ENGINE (Implementación)">4 DELIVERY ENGINE (Implementación)</option>
+              <option value="5 LAUNCHPAD (G2M)">5 LAUNCHPAD (G2M)</option>
+            </select>
+            <p class="hint">Indica en qué fase del proyecto (Metodología OPI 2026) se desarrollará esta tarea</p>
+          </div>
+          <div>
+            <label class="label">Sprint *</label>
+            <div style="display:flex;gap:10px;align-items:flex-start">
+              <select id="tsk_sprint" required class="select" style="flex:1">
+                <option value="">Seleccione un Sprint...</option>
+              </select>
+              <button type="button" onclick="abrirModalNuevoSprint()" class="btn btn-ghost" style="white-space:nowrap;padding:11px 14px;" title="Crear nuevo Sprint">
+                <i class="bi bi-plus-circle"></i> Nuevo
+              </button>
+            </div>
+            <p class="hint">Agrupa la tarea en un Sprint de trabajo. Si no hay Sprints, crea uno primero.</p>
+          </div>
+          <div>
+            <label class="label">Nombre Tarea *</label>
+            <input type="text" id="tsk_nombre" required minlength="3" class="input">
+            <p class="hint">Mínimo 3 caracteres</p>
+          </div>
+          <div>
+            <label class="label">Descripción</label>
+            <textarea id="tsk_descripcion" rows="2" maxlength="500" class="textarea" placeholder="Detalles de la tarea..."></textarea>
+          </div>
+          <div>
+            <label class="label">Asignado a (Email) *</label>
+            <input type="email" id="tsk_asignado" required class="input" placeholder="ejemplo@correo.com">
+          </div>
+          <div class="form-row">
+            <div>
+              <label class="label">Fecha Entrega</label>
+              <p id="tsk_fecha_info" class="hint" style="margin:0;padding:10px 12px;background:var(--surface-2,#f4f1fe);border:1px solid var(--border,#e5e7eb);border-radius:8px;font-size:0.85rem;color:var(--text-soft,#6b7280);">
+                <i class="bi bi-calendar-check"></i>
+                <span id="tsk_fecha_label">Se asignará automáticamente al seleccionar un Sprint.</span>
+              </p>
+              <p class="hint">La fecha de entrega se toma de la fecha de fin del Sprint seleccionado.</p>
+            </div>
+            <div>
+              <label class="label">Prioridad</label>
+              <select id="tsk_prioridad" class="select">
+                <option>Alta</option>
+                <option selected>Media</option>
+                <option>Baja</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label class="label">Comentarios iniciales</label>
+            <textarea id="tsk_comentarios" rows="2" maxlength="300" class="textarea" placeholder="Notas o contexto..."></textarea>
+          </div>
+          <div>
+            <label class="label" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="tsk_crear_recordatorio" onchange="toggleRecordatorioTarea()">
+              <span><i class="bi bi-calendar-plus"></i> Crear recordatorio en Google Calendar</span>
+            </label>
+            <p class="hint">Opcional. Si lo activas, se creará un evento titulado "Recordatorio: [Nombre de la tarea]".</p>
+          </div>
+          <div id="tsk_recordatorio_wrap" class="hidden form-row">
+            <div>
+              <label class="label">Fecha del recordatorio</label>
+              <input type="date" id="tsk_recordatorio_fecha" class="input">
+            </div>
+            <div>
+              <label class="label">Hora del recordatorio</label>
+              <input type="time" id="tsk_recordatorio_hora" class="input">
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button type="button" onclick="cerrarModal('modalTarea')" class="btn btn-ghost">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       Modal de confirmación propio de la aplicación
+       (reemplaza los confirm() nativos del navegador)
+       ============================================================ -->
+  <div id="modalConfirmacion" class="hidden modal-overlay" style="z-index:60">
+    <div class="modal" style="max-width:440px">
+      <div class="modal-head" style="border-bottom:none;padding-bottom:6px">
+        <h3 id="modalConfirmacionTitulo">
+          <span id="modalConfirmacionIcono" class="modal-confirm-ic"><i class="bi bi-exclamation-triangle"></i></span>
+          Confirmar acción
+        </h3>
+      </div>
+      <div class="modal-body" style="padding-top:10px">
+        <p id="modalConfirmacionMensaje" style="margin:0;color:var(--text-soft);font-size:0.92rem;line-height:1.55">¿Deseas continuar?</p>
+      </div>
+      <div class="modal-foot">
+        <button type="button" id="modalConfirmacionCancelar" class="btn btn-ghost">Cancelar</button>
+        <button type="button" id="modalConfirmacionAceptar" class="btn" style="background:var(--danger);color:#fff">Aceptar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       REQ 4: Modal propio para cambiar la ETAPA de una iniciativa
+       (motivo + fecha fin; la fecha de inicio se asigna a HOY + 1)
+       Etapas OPI 2026: DISCOVERY, CONCEPT STUDIO, PROJECT SETUP,
+       DELIVERY ENGINE, LAUNCHPAD (G2M), y "6 Iniciativa cerrada" para admins.
+       ============================================================ -->
+  <div id="modalCambioEtapa" class="hidden modal-overlay" style="z-index:60">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-head">
+        <h3><span class="mh-ic"><i class="bi bi-signpost-2"></i></span> Cambiar etapa</h3>
+        <button type="button" onclick="cancelarCambioEtapa()" class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="cambioEtapa_id">
+        <input type="hidden" id="cambioEtapa_nueva">
+        <p id="cambioEtapa_info" class="hint" style="font-size:0.9rem;color:var(--text-soft)"></p>
+        <div>
+          <label class="label">Motivo del cambio *</label>
+          <textarea id="cambioEtapa_motivo" rows="3" maxlength="300" class="textarea" placeholder="¿Por qué se cambia de etapa? (mínimo 5 caracteres)"></textarea>
+        </div>
+        <div>
+          <label class="label">Fecha final de la nueva etapa *</label>
+          <input type="date" id="cambioEtapa_fechaFin" class="input">
+          <p class="hint" id="cambioEtapa_fechaInicioHint"><i class="bi bi-info-circle"></i> La fecha de inicio se asigna automáticamente a mañana.</p>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" onclick="cancelarCambioEtapa()" class="btn btn-ghost">Cancelar</button>
+        <button type="button" onclick="confirmarCambioEtapa()" class="btn btn-primary">Confirmar cambio</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       REQ 5: Modal propio para cambiar el ESTADO (gestión) de una
+       iniciativa (Activo / En Pausa / Finalizado) con motivo.
+       ============================================================ -->
+  <div id="modalCambioEstado" class="hidden modal-overlay" style="z-index:60">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-head">
+        <h3><span class="mh-ic"><i class="bi bi-toggle-on"></i></span> Cambiar estado</h3>
+        <button type="button" onclick="cancelarModalCambioEstado()" class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="cambioEstado_id">
+        <input type="hidden" id="cambioEstado_nuevo">
+        <p id="cambioEstado_info" class="hint" style="font-size:0.9rem;color:var(--text-soft)"></p>
+        <div>
+          <label class="label">Motivo del cambio *</label>
+          <textarea id="cambioEstado_motivo" rows="3" maxlength="300" class="textarea" placeholder="¿Por qué se cambia el estado? (mínimo 5 caracteres)"></textarea>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" onclick="cancelarModalCambioEstado()" class="btn btn-ghost">Cancelar</button>
+        <button type="button" onclick="confirmarCambioEstadoGestion()" class="btn btn-primary">Confirmar cambio</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL NUEVO SPRINT
+       ============================================================ -->
+  <div id="modalNuevoSprint" class="hidden modal-overlay" style="z-index:65">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-head">
+        <h3><span class="mh-ic"><i class="bi bi-lightning-charge"></i></span> Nuevo Sprint</h3>
+        <button type="button" onclick="cerrarModal('modalNuevoSprint')" class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="spr_id_proyecto">
+        <div>
+          <label class="label">Nombre del Sprint *</label>
+          <input type="text" id="spr_nombre" class="input" placeholder="Ej: Sprint 1, Sprint Q1 2025..." minlength="2" required>
+        </div>
+        <div>
+          <label class="label">Descripción</label>
+          <textarea id="spr_descripcion" rows="2" class="textarea" placeholder="Objetivo o alcance del Sprint (opcional)"></textarea>
+        </div>
+        <div class="form-row">
+          <div>
+            <label class="label">Fecha inicio</label>
+            <input type="date" id="spr_fecha_inicio" class="input">
+          </div>
+          <div>
+            <label class="label">Fecha fin</label>
+            <input type="date" id="spr_fecha_fin" class="input">
+          </div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" onclick="cerrarModal('modalNuevoSprint')" class="btn btn-ghost">Cancelar</button>
+        <button type="button" id="btnGuardarSprint" onclick="guardarNuevoSprint()" class="btn btn-primary">
+          <i class="bi bi-check-lg"></i> Crear Sprint
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Widget usuario autenticado — se ejecuta como IIFE para no interferir
+    // con el DOMContentLoaded que registra JavaScript.html
+    (function () {
+      google.script.run
+        .withSuccessHandler(function (info) {
+          if (info && info.email) {
+            var emailEl  = document.getElementById('userEmail');
+            var avatarEl = document.getElementById('userAvatar');
+            if (emailEl)  emailEl.textContent  = info.email;
+            if (avatarEl) avatarEl.textContent = info.inicial || info.email.charAt(0).toUpperCase();
+          }
+        })
+        .withFailureHandler(function () { /* silencioso: no interrumpe la app */ })
+        .obtenerInfoUsuario();
+    })();
+  </script>
+
+  <?!= include('JavaScript'); ?>
+  <?!= include('Inicio'); ?>
+
+<a href="https://vertexaisearch.cloud.google.com/home/cid/8489b1da-b88a-4039-8a86-16f541d4c905/r/agent/12528757172531106810/session/-?hl=en_US&_gl=1*q67ncm*_ga*MTU1OTQ4MTg2NC4xNzcxMjU3NzY5*_ga_WH2QY8WWF5*czE3NzkyMDE2MzMkbzI0MiRnMSR0MTc3OTIwOTI1NSRqNDMkbDAkaDA" target="_blank" rel="noopener noreferrer" class="gemini-fab" title="Hablar con Dominique AI">
+    <i class="bi bi-stars"></i>
+  </a>
+
+</body>
+</html>
