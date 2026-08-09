@@ -49,6 +49,9 @@ Google Drive. Frontend como SPA en HtmlService.
 ## Decisiones de arquitectura vigentes
 - ADR-001: Progreso calculado desde sprint vigente, no campo manual
 - ADR-002: Gestores ven solo sus iniciativas. Admins ven todo.
-- ADR-003: Sin tareas automáticas. Planificación libre por sprint.
+- ADR-003: Sin tareas automáticas por etapa. La función 
+  _crearTareasAutomaticasProyecto() está DEPRECADA y no debe llamarse. 
+  Cada gestor crea sus tareas libremente al planificar cada sprint.
+  PENDIENTE: eliminar la llamada a esta función en crearProyecto().
 - ADR-004: Accesos rápidos en Sheets con fallback a localStorage.
 - ADR-005: Historial_Etapas ya existe con 9 columnas confirmadas.
