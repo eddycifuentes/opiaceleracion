@@ -193,20 +193,17 @@ Sistema de seguimiento y gestión de iniciativas de aceleración de la Vicepresi
 
 ---
 
-### Requirement 13: Tareas Automáticas por Etapa [IMPLEMENTED — Parcial]
+### Requirement 13: Planificación Libre de Tareas por Sprint [UPDATED — ADR-003]
 
-**User Story:** As a Gestor, I want the system to create predefined tasks when an initiative enters a new stage, so that I have a structured starting point per methodology phase.
+**User Story:** As a Gestor, I want to create tasks freely within each sprint, so that I can plan according to my initiative's real needs without being restricted to a predefined catalog.
 
 #### Acceptance Criteria
 
-1. THE Sistema SHALL maintain a TAREAS_POR_ETAPA catalog defining predefined task names for each of the 5 active stages according to Metodología OPI 2026.
-2. WHEN an initiative is created, THE Sistema SHALL create tasks from the TAREAS_POR_ETAPA catalog corresponding to the initial stage, associated to the initial Sprint.
-3. WHEN an initiative changes stage, THE Sistema SHALL create tasks from the TAREAS_POR_ETAPA catalog corresponding to the new stage, associated to the newly created Sprint.
-4. WHEN auto-tasks are created, THE Sistema SHALL assign the Asignado_A field to the initiative Propietario email.
-5. WHEN auto-tasks are created, THE Sistema SHALL set the Fecha_Entrega to the Fecha_Fin of the associated Sprint.
-6. IF the TAREAS_POR_ETAPA catalog does not have entries for the target stage (e.g., stage 6), THEN THE Sistema SHALL skip auto-task creation without error.
-
----
+1. WHEN an initiative is created, THE Sistema SHALL NOT create any automatic tasks.
+2. THE Sistema SHALL NOT call _crearTareasAutomaticasProyecto() from any active flow.
+3. THE TAREAS_POR_ETAPA catalog in CONFIG SHALL be maintained as a reference only, not used for automatic creation.
+4. WHEN a Gestor creates a task, THE Sistema SHALL allow free association to any sprint of the initiative.
+5. IF _crearTareasAutomaticasProyecto() exists in the code, it SHALL be marked @deprecated and never invoked.
 
 ### Requirement 14: Resumen Ejecutivo Periódico [PLANNED]
 

@@ -186,6 +186,7 @@ Este documento describe la arquitectura existente (Requirements 1–13) y el dis
 | Columna | Tipo | Descripción |
 |---|---|---|
 | ID_Proyecto | String | FK → Proyectos |
+| Proyecto | String | Nombre de la iniciativa (desnormalizado) |
 | Etapa_Anterior | String | Etapa antes del cambio |
 | Etapa_Nueva | String | Etapa después del cambio |
 | Motivo | String | Justificación (min 5 chars) |
