@@ -12,8 +12,14 @@ export const LoginPage: React.FC = () => {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    login(email, password);
-    navigate('/#/dashboard');
+    try {
+      console.log(`[LoginPage] Iniciando login para ${email}`);
+      login(email, password);
+      console.log(`[LoginPage] Login exitoso, navegando a dashboard`);
+      navigate('/dashboard');
+    } catch (error) {
+      console.error(`[LoginPage] Login falló: ${error instanceof Error ? error.message : 'Error desconocido'}`);
+    }
   };
 
   return (
