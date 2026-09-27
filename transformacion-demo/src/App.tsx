@@ -14,8 +14,6 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 };
 
 function App() {
-  const { isAuthenticated } = useAuthStore();
-
   // Check localStorage for previous session
   useEffect(() => {
     const savedAuth = localStorage.getItem('auth');
@@ -23,7 +21,7 @@ function App() {
       try {
         const authData = JSON.parse(savedAuth);
         if (authData.isAuthenticated) {
-          useAuthStore.setState(authData);
+          // Auth is automatically restored from localStorage by AuthProvider
         }
       } catch (error) {
         console.error('Error loading auth from localStorage:', error);

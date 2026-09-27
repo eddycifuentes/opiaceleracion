@@ -5,7 +5,7 @@ import { useSprintsStore } from '../store/sprintsStore';
 import { Header } from '../components/Header';
 import { Sidebar } from '../components/Sidebar';
 import { Button } from '../components/Button';
-import { Download, FileText } from 'lucide-react';
+import { Download } from 'lucide-react';
 
 export const ReportesPage: React.FC = () => {
   const { iniciativas } = useIniciativasStore();

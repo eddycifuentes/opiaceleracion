@@ -71,11 +71,6 @@ export const IniciativasPage: React.FC = () => {
     }
   };
 
-  const getProyectoNombre = (id: string) => {
-    const ini = iniciativas.find((i) => i.id === id);
-    return ini?.nombre || id;
-  };
-
   return (
     <div className="flex h-screen bg-gray-100">
       <Sidebar />

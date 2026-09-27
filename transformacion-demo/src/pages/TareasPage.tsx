@@ -7,11 +7,11 @@ import { Modal } from '../components/Modal';
 import { Button } from '../components/Button';
 import { Select } from '../components/Select';
 import { TareaRow } from '../components/TareaRow';
-import { Tarea, estadosTarea, prioridades } from '../data/mockData';
+import { Tarea, estadosTarea } from '../data/mockData';
 import { Search } from 'lucide-react';
 
 export const TareasPage: React.FC = () => {
-  const { tareas, updateTarea, deleteTarea, changeEstado } = useTareasStore();
+  const { tareas, deleteTarea, changeEstado } = useTareasStore();
   const { iniciativas } = useIniciativasStore();
 
   const [searchTerm, setSearchTerm] = useState('');

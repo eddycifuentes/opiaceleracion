@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAuthStore } from '../store/authStore';
 import { Button } from './Button';
-import { LogOut, User } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 
 interface HeaderProps {
   title: string;
