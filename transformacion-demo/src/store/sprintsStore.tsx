@@ -16,6 +16,8 @@ interface SprintsState {
 const SprintsContext = createContext<SprintsState | undefined>(undefined);
 
 export const SprintsProvider = ({ children }: { children: ReactNode }) => {
+  Logger.info('[sprintsStore] SprintsProvider mounted');
+  
   const [sprints, setSprints] = useState<Sprint[]>(mockSprints);
 
   const updateSprint = (id: string, data: Partial<Sprint>) => {

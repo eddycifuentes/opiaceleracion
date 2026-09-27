@@ -17,6 +17,8 @@ interface TareasState {
 const TareasContext = createContext<TareasState | undefined>(undefined);
 
 export const TareasProvider = ({ children }: { children: ReactNode }) => {
+  Logger.info('[tareasStore] TareasProvider mounted');
+  
   const [tareas, setTareas] = useState<Tarea[]>(mockTareas);
 
   const updateTarea = (id: string, data: Partial<Tarea>) => {

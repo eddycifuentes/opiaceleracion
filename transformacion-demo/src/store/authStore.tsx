@@ -20,6 +20,8 @@ interface AuthState {
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
+  Logger.info('[authStore] AuthProvider mounted');
+  
   const [authState, setAuthState] = useState<Omit<AuthState, 'login' | 'logout'>>(() => {
     const stored = localStorage.getItem('auth');
     if (stored) {

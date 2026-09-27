@@ -23,7 +23,15 @@ import {
 } from 'recharts';
 import { TrendingUp, Zap, CheckSquare, Target } from 'lucide-react';
 
+// Logger utility
+const Logger = {
+  info: (msg: string) => console.log(`[INFO] ${msg}`),
+  error: (msg: string) => console.error(`[ERROR] ${msg}`),
+};
+
 export const DashboardPage: React.FC = () => {
+  Logger.info('[DashboardPage] DashboardPage loaded');
+  
   const { iniciativas } = useIniciativasStore();
   const { tareas } = useTareasStore();
   const { sprints } = useSprintsStore();

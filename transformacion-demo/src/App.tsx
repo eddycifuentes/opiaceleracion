@@ -1,6 +1,10 @@
 import React, { useEffect } from 'react';
-import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './store/authStore';
+import { AuthProvider } from './store/authStore';
+import { TareasProvider } from './store/tareasStore';
+import { IniciativasProvider } from './store/iniciativasStore';
+import { SprintsProvider } from './store/sprintsStore';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { IniciativasPage } from './pages/IniciativasPage';
@@ -8,12 +12,18 @@ import { TareasPage } from './pages/TareasPage';
 import { SprintsPage } from './pages/SprintsPage';
 import { ReportesPage } from './pages/ReportesPage';
 
+// Logger utility
+const Logger = {
+  info: (msg: string) => console.log(`[INFO] ${msg}`),
+  error: (msg: string) => console.error(`[ERROR] ${msg}`),
+};
+
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated } = useAuthStore();
   return isAuthenticated ? <>{children}</> : <Navigate to="/" />;
 };
 
-function App() {
+const AppRoutes = () => {
   // Check localStorage for previous session
   useEffect(() => {
     const savedAuth = localStorage.getItem('auth');
@@ -21,10 +31,10 @@ function App() {
       try {
         const authData = JSON.parse(savedAuth);
         if (authData.isAuthenticated) {
-          // Auth is automatically restored from localStorage by AuthProvider
+          Logger.info('[App] Auth restored from localStorage');
         }
       } catch (error) {
-        console.error('Error loading auth from localStorage:', error);
+        Logger.error('Error loading auth from localStorage');
       }
     }
   }, []);
@@ -76,6 +86,22 @@ function App() {
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </Router>
+  );
+};
+
+function App() {
+  Logger.info('[App] App rendered');
+
+  return (
+    <AuthProvider>
+      <TareasProvider>
+        <IniciativasProvider>
+          <SprintsProvider>
+            <AppRoutes />
+          </SprintsProvider>
+        </IniciativasProvider>
+      </TareasProvider>
+    </AuthProvider>
   );
 }
 
