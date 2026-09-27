@@ -1,26 +1,38 @@
 import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { LayoutDashboard, Zap, CheckSquare, Play, FileText } from 'lucide-react';
 
 interface NavItem {
   label: string;
   icon: React.ReactNode;
-  href: string;
+  path: string;
 }
 
+// Logger utility
+const Logger = {
+  info: (msg: string) => console.log(`[INFO] ${msg}`),
+  error: (msg: string) => console.error(`[ERROR] ${msg}`),
+};
+
 export const Sidebar: React.FC = () => {
+  const navigate = useNavigate();
   const location = useLocation();
 
   const navItems: NavItem[] = [
-    { label: 'Dashboard', icon: <LayoutDashboard size={20} />, href: '#/dashboard' },
-    { label: 'Iniciativas', icon: <Zap size={20} />, href: '#/iniciativas' },
-    { label: 'Tareas', icon: <CheckSquare size={20} />, href: '#/tareas' },
-    { label: 'Sprints', icon: <Play size={20} />, href: '#/sprints' },
-    { label: 'Reportes', icon: <FileText size={20} />, href: '#/reportes' },
+    { label: 'Dashboard', icon: <LayoutDashboard size={20} />, path: '/dashboard' },
+    { label: 'Iniciativas', icon: <Zap size={20} />, path: '/iniciativas' },
+    { label: 'Tareas', icon: <CheckSquare size={20} />, path: '/tareas' },
+    { label: 'Sprints', icon: <Play size={20} />, path: '/sprints' },
+    { label: 'Reportes', icon: <FileText size={20} />, path: '/reportes' },
   ];
 
-  const isActive = (href: string) => {
-    return location.hash === href || (location.pathname + location.hash).includes(href.replace('#', ''));
+  const isActive = (path: string) => {
+    return location.pathname === path;
+  };
+
+  const handleNavigation = (path: string, label: string) => {
+    Logger.info(`[Sidebar] Navegando a ${path} (${label})`);
+    navigate(path);
   };
 
   return (
@@ -32,18 +44,18 @@ export const Sidebar: React.FC = () => {
 
       <nav className="space-y-2">
         {navItems.map((item) => (
-          <Link
-            key={item.href}
-            to={item.href}
-            className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-              isActive(item.href)
+          <button
+            key={item.path}
+            onClick={() => handleNavigation(item.path, item.label)}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+              isActive(item.path)
                 ? 'bg-blue-600 text-white'
                 : 'text-gray-300 hover:bg-gray-700'
             }`}
           >
             {item.icon}
             <span className="font-medium">{item.label}</span>
-          </Link>
+          </button>
         ))}
       </nav>
 

@@ -1,11 +1,11 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useIniciativasStore } from '../store/iniciativasStore';
 import { useTareasStore } from '../store/tareasStore';
 import { useSprintsStore } from '../store/sprintsStore';
 import { Header } from '../components/Header';
 import { Sidebar } from '../components/Sidebar';
 import { KPICard } from '../components/KPICard';
-import { Button } from '../components/Button';
 import {
   PieChart,
   Pie,
@@ -31,6 +31,7 @@ const Logger = {
 
 export const DashboardPage: React.FC = () => {
   Logger.info('[DashboardPage] DashboardPage loaded');
+  const navigate = useNavigate();
   
   const { iniciativas } = useIniciativasStore();
   const { tareas } = useTareasStore();
@@ -66,6 +67,21 @@ export const DashboardPage: React.FC = () => {
   ];
 
   const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444'];
+
+  const handleVerIniciativas = () => {
+    Logger.info('[DashboardPage] Navegando a /iniciativas');
+    navigate('/iniciativas');
+  };
+
+  const handleVerTareas = () => {
+    Logger.info('[DashboardPage] Navegando a /tareas');
+    navigate('/tareas');
+  };
+
+  const handleVerSprints = () => {
+    Logger.info('[DashboardPage] Navegando a /sprints');
+    navigate('/sprints');
+  };
 
   return (
     <div className="flex h-screen bg-gray-100">
@@ -104,9 +120,24 @@ export const DashboardPage: React.FC = () => {
 
             {/* Action Buttons */}
             <div className="flex gap-4 mb-8">
-              <Button variant="primary">Ver Iniciativas</Button>
-              <Button variant="secondary">Ver Tareas</Button>
-              <Button variant="secondary">Ver Sprints</Button>
+              <button
+                onClick={handleVerIniciativas}
+                className="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Ver Iniciativas
+              </button>
+              <button
+                onClick={handleVerTareas}
+                className="px-6 py-2 bg-gray-600 text-white font-semibold rounded-lg hover:bg-gray-700 transition-colors"
+              >
+                Ver Tareas
+              </button>
+              <button
+                onClick={handleVerSprints}
+                className="px-6 py-2 bg-gray-600 text-white font-semibold rounded-lg hover:bg-gray-700 transition-colors"
+              >
+                Ver Sprints
+              </button>
             </div>
 
             {/* Charts */}
