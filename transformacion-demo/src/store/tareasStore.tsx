@@ -27,7 +27,7 @@ export const TareasProvider = ({ children }: { children: ReactNode }) => {
           tarea.id === id ? { ...tarea, ...data } : tarea
         )
       );
-      Logger.info(`[tareasStore.updateTarea] Actualización exitosa: ${id}`);
+      Logger.info(`[tareasStore.updateTarea] Actualizacion exitosa: ${id}`);
     } catch (e) {
       Logger.error(`[tareasStore.updateTarea] FALLO: ${e instanceof Error ? e.message : 'Error desconocido'}`);
       throw new Error(`No se pudo actualizar tarea: ${id}`);
@@ -40,7 +40,7 @@ export const TareasProvider = ({ children }: { children: ReactNode }) => {
       setTareas((state) =>
         state.filter((tarea) => tarea.id !== id)
       );
-      Logger.info(`[tareasStore.deleteTarea] Eliminación exitosa: ${id}`);
+      Logger.info(`[tareasStore.deleteTarea] Eliminacion exitosa: ${id}`);
     } catch (e) {
       Logger.error(`[tareasStore.deleteTarea] FALLO: ${e instanceof Error ? e.message : 'Error desconocido'}`);
       throw new Error(`No se pudo eliminar tarea: ${id}`);
@@ -55,7 +55,7 @@ export const TareasProvider = ({ children }: { children: ReactNode }) => {
           tarea.id === id ? { ...tarea, estado: newEstado } : tarea
         )
       );
-      Logger.info(`[tareasStore.changeEstado] Cambio exitoso: ${id} → ${newEstado}`);
+      Logger.info(`[tareasStore.changeEstado] Cambio exitoso: ${id} -> ${newEstado}`);
     } catch (e) {
       Logger.error(`[tareasStore.changeEstado] FALLO al cambiar estado ${id}: ${e instanceof Error ? e.message : 'Error desconocido'}`);
       throw new Error(`No se pudo cambiar estado de tarea: ${id}`);

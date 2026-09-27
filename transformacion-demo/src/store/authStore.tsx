@@ -31,7 +31,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const login = (email: string, _password: string) => {
     try {
-      Logger.info(`[authStore.login] Iniciando sesión para: ${email}`);
+      Logger.info(`[authStore.login] Iniciando sesion para: ${email}`);
       const newState = {
         isAuthenticated: true,
         user: {
@@ -45,19 +45,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       Logger.info(`[authStore.login] Login exitoso: ${email}`);
     } catch (e) {
       Logger.error(`[authStore.login] FALLO: ${e instanceof Error ? e.message : 'Error desconocido'}`);
-      throw new Error(`No se pudo iniciar sesión: ${email}`);
+      throw new Error(`No se pudo iniciar sesion: ${email}`);
     }
   };
 
   const logout = () => {
     try {
-      Logger.info(`[authStore.logout] Cerrando sesión`);
+      Logger.info(`[authStore.logout] Cerrando sesion`);
       setAuthState({ isAuthenticated: false, user: null });
       localStorage.removeItem("auth");
       Logger.info(`[authStore.logout] Logout exitoso`);
     } catch (e) {
       Logger.error(`[authStore.logout] FALLO: ${e instanceof Error ? e.message : 'Error desconocido'}`);
-      throw new Error(`No se pudo cerrar sesión`);
+      throw new Error(`No se pudo cerrar sesion`);
     }
   };
 

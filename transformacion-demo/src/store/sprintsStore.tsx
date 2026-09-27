@@ -26,7 +26,7 @@ export const SprintsProvider = ({ children }: { children: ReactNode }) => {
           sprint.id === id ? { ...sprint, ...data } : sprint
         )
       );
-      Logger.info(`[sprintsStore.updateSprint] Actualización exitosa: ${id}`);
+      Logger.info(`[sprintsStore.updateSprint] Actualizacion exitosa: ${id}`);
     } catch (e) {
       Logger.error(`[sprintsStore.updateSprint] FALLO: ${e instanceof Error ? e.message : 'Error desconocido'}`);
       throw new Error(`No se pudo actualizar sprint: ${id}`);
@@ -39,7 +39,7 @@ export const SprintsProvider = ({ children }: { children: ReactNode }) => {
       setSprints((state) =>
         state.filter((sprint) => sprint.id !== id)
       );
-      Logger.info(`[sprintsStore.deleteSprint] Eliminación exitosa: ${id}`);
+      Logger.info(`[sprintsStore.deleteSprint] Eliminacion exitosa: ${id}`);
     } catch (e) {
       Logger.error(`[sprintsStore.deleteSprint] FALLO: ${e instanceof Error ? e.message : 'Error desconocido'}`);
       throw new Error(`No se pudo eliminar sprint: ${id}`);
