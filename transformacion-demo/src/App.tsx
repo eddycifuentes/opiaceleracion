@@ -11,6 +11,7 @@ import { IniciativasPage } from './pages/IniciativasPage';
 import { TareasPage } from './pages/TareasPage';
 import { SprintsPage } from './pages/SprintsPage';
 import { ReportesPage } from './pages/ReportesPage';
+import AIAssistant from './components/AIAssistant';
 
 // Logger utility
 const Logger = {
@@ -98,6 +99,7 @@ function App() {
         <IniciativasProvider>
           <SprintsProvider>
             <AppRoutes />
+            <AIAssistant />
           </SprintsProvider>
         </IniciativasProvider>
       </TareasProvider>
