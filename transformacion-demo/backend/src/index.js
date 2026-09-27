@@ -8,13 +8,10 @@ dotenv.config();
 const app = express();
 app.use(cors({
   origin: function (origin, callback) {
-    const allowedOrigins = [
-      'http://localhost:5173',
-      'https://opiaceleracion.vercel.app',
-      'https://opiaceleracion-kkhmaa9pw-eacu.vercel.app'
-    ];
-
-    if (!origin || allowedOrigins.includes(origin)) {
+    // Permitir localhost + cualquier vercel.app + opiaceleracion.vercel.app
+    if (!origin || 
+        origin.includes('localhost') || 
+        origin.includes('vercel.app')) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
