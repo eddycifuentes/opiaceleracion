@@ -6,18 +6,27 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 dotenv.config();
 
 const app = express();
+
+// Lista blanca de orígenes permitidos: desarrollo local y producción.
+const ORIGENES_PERMITIDOS = [
+  'http://localhost:5173',
+  'https://opiaceleracion.vercel.app'
+];
+
+// Patrón para los despliegues de preview de Vercel.
+// Cada push a una rama genera una URL única con sufijo aleatorio
+// (p. ej. https://opiaceleracion-git-rama-eacu.vercel.app), por lo que no
+// es posible listarlas una por una. El patrón las acepta solo si siguen el
+// formato esperado del proyecto, evitando abrir CORS a cualquier *.vercel.app.
+const PATRON_PREVIEW = /^https:\/\/opiaceleracion(-[a-z0-9-]+)?-eacu\.vercel\.app$/;
+
 app.use(cors({
-  origin: function (origin, callback) {
-    // Permitir localhost + cualquier vercel.app + opiaceleracion.vercel.app
-    if (!origin || 
-        origin.includes('localhost') || 
-        origin.includes('vercel.app')) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
+  origin: (origin, cb) => {
+    if (!origin || ORIGENES_PERMITIDOS.includes(origin) || PATRON_PREVIEW.test(origin)) {
+      return cb(null, true);
     }
+    return cb(new Error('Origen no permitido por CORS'));
   },
-  credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type']
 }));
