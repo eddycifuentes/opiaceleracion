@@ -195,45 +195,39 @@ Respondes preguntas sobre iniciativas, tareas, sprints y estadísticas.
 Usa las tools disponibles para acceder a datos reales.
 Responde en ESPAÑOL, de forma clara y profesional.`;
 
-    const chat = model.startChat({
-      history: []
-    });
-
-    // Primera llamada a Gemini
-    const response = await chat.sendMessage(message);
-    
     let textResponse = "";
     let toolsUsed = [];
 
-    const candidate = response.response.candidates?.[0];
+    // Primera llamada a Gemini con rol explícito de usuario.
+    const result1 = await model.generateContent({
+      contents: [{ role: "user", parts: [{ text: message }] }]
+    });
 
-    if (candidate?.content?.parts) {
-      for (const part of candidate.content.parts) {
-        if (part.text) {
-          textResponse = part.text;
-        } else if (part.functionCall) {
-          const toolName = part.functionCall.name;
-          const toolResult = executeTool(toolName);
-          toolsUsed.push({ tool: toolName, result: toolResult });
+    const parts1 = result1.response.candidates?.[0]?.content?.parts || [];
+    const call = parts1.find(p => p.functionCall);
 
-          console.log(`[Tool] Ejecutada: ${toolName}`);
+    if (call) {
+      // Hay una llamada a función: ejecutar la tool correspondiente.
+      const toolName = call.functionCall.name;
+      const toolResult = executeTool(toolName);
+      toolsUsed.push({ tool: toolName, result: toolResult });
 
-          // Segunda llamada con resultado
-          const toolResponse = await chat.sendMessage([
-            {
-              functionResponse: {
-                name: toolName,
-                response: toolResult
-              }
-            }
-          ]);
+      console.log(`[Tool] Ejecutada: ${toolName}`);
 
-          const finalText = toolResponse.response.text();
-          if (finalText) {
-            textResponse = finalText;
-          }
-        }
-      }
+      // Segunda llamada reconstruyendo el historial con roles explícitos:
+      // user (mensaje) -> model (functionCall) -> user (functionResponse).
+      const result2 = await model.generateContent({
+        contents: [
+          { role: "user", parts: [{ text: message }] },
+          { role: "model", parts: [{ functionCall: call.functionCall }] },
+          { role: "user", parts: [{ functionResponse: { name: call.functionCall.name, response: toolResult } }] }
+        ]
+      });
+
+      textResponse = result2.response.text();
+    } else {
+      // No hay llamada a función: usar la respuesta de texto directa.
+      textResponse = result1.response.text();
     }
 
     res.json({
