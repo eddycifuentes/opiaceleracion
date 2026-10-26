@@ -129,9 +129,21 @@ function executeTool(toolName) {
 // Endpoint Chat
 app.post('/api/chat', async (req, res) => {
   try {
-    const { message, userId } = req.body;
+    const { message } = req.body;
 
-    console.log(`[Chat] Usuario: ${userId}, Mensaje: ${message}`);
+    // Validación de entrada: message debe ser string no vacío y <= 500 caracteres.
+    if (typeof message !== 'string' || message.trim().length === 0) {
+      return res.status(400).json({
+        error: 'El mensaje es obligatorio y debe ser texto no vacío.'
+      });
+    }
+    if (message.length > 500) {
+      return res.status(400).json({
+        error: 'El mensaje no puede superar los 500 caracteres.'
+      });
+    }
+
+    console.log('[Chat] Mensaje recibido');
 
     const model = genAI.getGenerativeModel({ 
       model: "gemini-2.0-flash",

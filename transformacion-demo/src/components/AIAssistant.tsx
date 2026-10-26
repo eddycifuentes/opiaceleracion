@@ -59,10 +59,7 @@ export default function AIAssistant() {
       const response = await fetch(`${API_URL}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: input,
-          userId: 'eddy.cifuentes@segurosbolivar.com'
-        })
+        body: JSON.stringify({ message: input })
       });
 
       if (!response.ok) {
