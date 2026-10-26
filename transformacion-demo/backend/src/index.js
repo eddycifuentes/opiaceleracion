@@ -219,7 +219,7 @@ Responde en ESPAÑOL, de forma clara y profesional.`;
       const result2 = await model.generateContent({
         contents: [
           { role: "user", parts: [{ text: message }] },
-          { role: "model", parts: [{ functionCall: call.functionCall }] },
+          { role: "model", parts: parts1 },
           { role: "user", parts: [{ functionResponse: { name: call.functionCall.name, response: toolResult } }] }
         ]
       });
