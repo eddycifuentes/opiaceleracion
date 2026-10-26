@@ -219,17 +219,14 @@ Responde en ESPAÑOL, de forma clara y profesional.`;
           console.log(`[Tool] Ejecutada: ${toolName}`);
 
           // Segunda llamada con resultado
-          const toolResponse = await chat.sendMessage({
-            role: "user",
-            parts: [
-              {
-                functionResponse: {
-                  name: toolName,
-                  response: toolResult
-                }
+          const toolResponse = await chat.sendMessage([
+            {
+              functionResponse: {
+                name: toolName,
+                response: toolResult
               }
-            ]
-          });
+            }
+          ]);
 
           const finalText = toolResponse.response.text();
           if (finalText) {
