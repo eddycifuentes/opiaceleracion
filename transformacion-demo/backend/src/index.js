@@ -184,7 +184,7 @@ app.post('/api/chat', async (req, res) => {
     console.log('[Chat] Mensaje recibido');
 
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.0-flash",
+      model: "gemini-3.8-flash",
       tools: [{
         functionDeclarations: tools
       }]
