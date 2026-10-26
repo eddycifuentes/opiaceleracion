@@ -146,34 +146,35 @@ Responde en ESPAÑOL, de forma clara y profesional.`;
     let textResponse = "";
     let toolsUsed = [];
 
-    for (const content of response.response.content) {
-      if (content.parts) {
-        for (const part of content.parts) {
-          if (part.text) {
-            textResponse = part.text;
-          } else if (part.functionCall) {
-            const toolName = part.functionCall.name;
-            const toolResult = executeTool(toolName);
-            toolsUsed.push({ tool: toolName, result: toolResult });
+    const candidate = response.response.candidates?.[0];
 
-            console.log(`[Tool] Ejecutada: ${toolName}`);
+    if (candidate?.content?.parts) {
+      for (const part of candidate.content.parts) {
+        if (part.text) {
+          textResponse = part.text;
+        } else if (part.functionCall) {
+          const toolName = part.functionCall.name;
+          const toolResult = executeTool(toolName);
+          toolsUsed.push({ tool: toolName, result: toolResult });
 
-            // Segunda llamada con resultado
-            const toolResponse = await chat.sendMessage({
-              role: "user",
-              parts: [
-                {
-                  functionResponse: {
-                    name: toolName,
-                    response: toolResult
-                  }
+          console.log(`[Tool] Ejecutada: ${toolName}`);
+
+          // Segunda llamada con resultado
+          const toolResponse = await chat.sendMessage({
+            role: "user",
+            parts: [
+              {
+                functionResponse: {
+                  name: toolName,
+                  response: toolResult
                 }
-              ]
-            });
+              }
+            ]
+          });
 
-            if (toolResponse.response.text) {
-              textResponse = toolResponse.response.text;
-            }
+          const finalText = toolResponse.response.text();
+          if (finalText) {
+            textResponse = finalText;
           }
         }
       }
@@ -186,10 +187,9 @@ Responde en ESPAÑOL, de forma clara y profesional.`;
     });
 
   } catch (error) {
-    console.error('[Error]', error);
+    console.error('[Error]', error.stack);
     res.status(500).json({ 
-      error: "Error procesando solicitud",
-      message: error.message 
+      error: "Error procesando solicitud"
     });
   }
 });
