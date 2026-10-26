@@ -1,18 +1,13 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { LayoutDashboard, Zap, CheckSquare, Play, FileText } from 'lucide-react';
+import { Logger } from '../utils/logger';
 
 interface NavItem {
   label: string;
   icon: React.ReactNode;
   path: string;
 }
-
-// Logger utility
-const Logger = {
-  info: (msg: string) => console.log(`[INFO] ${msg}`),
-  error: (msg: string) => console.error(`[ERROR] ${msg}`),
-};
 
 export const Sidebar: React.FC = () => {
   const navigate = useNavigate();

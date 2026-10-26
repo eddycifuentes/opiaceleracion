@@ -1,11 +1,6 @@
 import { createContext, useContext, useState, ReactNode } from 'react';
 import { Sprint, mockSprints } from '../data/mockData';
-
-// Logger utility
-const Logger = {
-  info: (msg: string) => console.log(`[INFO] ${msg}`),
-  error: (msg: string) => console.error(`[ERROR] ${msg}`),
-};
+import { Logger } from '../utils/logger';
 
 interface SprintsState {
   sprints: Sprint[];

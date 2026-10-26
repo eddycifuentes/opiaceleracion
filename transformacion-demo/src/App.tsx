@@ -12,12 +12,7 @@ import { TareasPage } from './pages/TareasPage';
 import { SprintsPage } from './pages/SprintsPage';
 import { ReportesPage } from './pages/ReportesPage';
 import AIAssistant from './components/AIAssistant';
-
-// Logger utility
-const Logger = {
-  info: (msg: string) => console.log(`[INFO] ${msg}`),
-  error: (msg: string) => console.error(`[ERROR] ${msg}`),
-};
+import { Logger } from './utils/logger';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated } = useAuthStore();
