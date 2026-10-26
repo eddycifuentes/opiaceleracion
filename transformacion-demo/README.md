@@ -9,7 +9,7 @@ Prototipo interactivo de un sistema de gestión de iniciativas, tareas y sprints
 - **Tareas**: Tabla de tareas con estados y prioridades
 - **Sprints**: Planificación de sprints con detalles
 - **Reportes**: Análisis ejecutivo y KPIs
-- **Autenticación**: Simulada (demo)
+- **Autenticación**: Simulada (demo). No hay validación real: acepta cualquier contraseña.
 - **Estado Local**: Zustand para manejo de estado
 
 ## 🛠️ Stack
@@ -41,6 +41,8 @@ El servidor estará disponible en `http://localhost:3000`
 - **Email**: eddy.cifuentes@segurosbolivar.com
 - **Password**: password
 
+> El login es simulado. Cualquier contraseña es aceptada; las credenciales de arriba solo vienen precargadas por comodidad.
+
 ## 🏗️ Build
 
 ```bash
@@ -70,10 +72,10 @@ src/
 │   ├── TareaRow.tsx
 │   └── SprintCard.tsx
 ├── store/             # Zustand stores
-│   ├── authStore.ts
-│   ├── iniciativasStore.ts
-│   ├── tareasStore.ts
-│   └── sprintsStore.ts
+│   ├── authStore.tsx
+│   ├── iniciativasStore.tsx
+│   ├── tareasStore.tsx
+│   └── sprintsStore.tsx
 ├── data/              # Mock data
 │   └── mockData.ts
 ├── App.tsx            # Componente principal
@@ -132,20 +134,36 @@ src/
 
 ## 🚀 Deployment
 
-Preparado para Vercel:
+El despliegue es automático al hacer push a `main`:
+
+- **Frontend**: Vercel (build `npm run build`, salida `dist/`).
+- **Backend** (`backend/`, asistente IA): Render.
+
+No hay pipeline propio de CI/CD en el repositorio (no existe `.github/`); la automatización la proveen Vercel y Render conectados al repo.
 
 ```bash
-npm run build
-# Subir carpeta 'dist' a Vercel
+npm run build      # genera dist/ (lo que Vercel publica)
 ```
 
 ## 📝 Notas
 
 - Este es un prototipo de demostración
 - Los datos son mock y se resetean al recargar
-- No hay backend real
-- La autenticación es simulada
+- La autenticación es simulada (acepta cualquier contraseña)
 - Los botones de descarga (PDF/CSV) son mock
+- Existe un backend mínimo en `backend/` solo para el asistente IA (Gemini); el resto de la app funciona con datos mock en memoria
+
+## 🏛️ Sistema original (Apps Script)
+
+Esta demo es un prototipo frontend y **no** reimplementa el sistema de producción.
+Las siguientes capacidades pertenecen al sistema original construido sobre Google
+Apps Script + Google Sheets y **no forman parte de esta demo**:
+
+- Alertas automáticas
+- Control de acceso por roles (gestores vs. administradores)
+- Generación automática de reportes PDF
+
+En la demo, los equivalentes (descargas PDF/CSV, etc.) son simulados.
 
 ## 📞 Soporte
 

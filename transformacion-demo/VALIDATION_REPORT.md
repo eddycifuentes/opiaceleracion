@@ -59,10 +59,10 @@ Fecha: 26 de Septiembre, 2026
 - ✅ **SprintCard.tsx** - Tarjeta de sprint
 
 #### 6. Stores Zustand
-- ✅ **authStore.ts** - Login, logout, persistencia
-- ✅ **iniciativasStore.ts** - CRUD mock
-- ✅ **tareasStore.ts** - CRUD mock
-- ✅ **sprintsStore.ts** - CRUD mock
+- ✅ **authStore.tsx** - Login, logout, persistencia
+- ✅ **iniciativasStore.tsx** - CRUD mock
+- ✅ **tareasStore.tsx** - CRUD mock
+- ✅ **sprintsStore.tsx** - CRUD mock
 
 #### 7. Mock Data
 - ✅ **8 Iniciativas** - Diversas etapas y estados

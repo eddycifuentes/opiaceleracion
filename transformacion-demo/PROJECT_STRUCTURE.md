@@ -41,10 +41,10 @@ transformacion-demo/
 │   │   └── SprintCard.tsx          # Tarjeta de sprint
 │   │
 │   ├── store/                      # Zustand stores (4 archivos)
-│   │   ├── authStore.ts            # Estado de autenticación
-│   │   ├── iniciativasStore.ts     # Estado de iniciativas
-│   │   ├── tareasStore.ts          # Estado de tareas
-│   │   └── sprintsStore.ts         # Estado de sprints
+│   │   ├── authStore.tsx           # Estado de autenticación
+│   │   ├── iniciativasStore.tsx    # Estado de iniciativas
+│   │   ├── tareasStore.tsx         # Estado de tareas
+│   │   └── sprintsStore.tsx        # Estado de sprints
 │   │
 │   ├── data/                       # Mock data (1 archivo)
 │   │   └── mockData.ts             # Datos simulados completos

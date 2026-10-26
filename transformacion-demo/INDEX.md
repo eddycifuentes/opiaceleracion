@@ -61,7 +61,7 @@ transformacion-demo/
 ├── 📦 CÓDIGO FUENTE (src/)
 │   ├── pages/                     (6 páginas)
 │   ├── components/                (10 componentes)
-│   ├── store/                     (4 stores Zustand)
+│   ├── store/                     (4 stores Zustand, archivos .tsx)
 │   ├── data/                      (mock data)
 │   ├── App.tsx                    (router principal)
 │   ├── index.tsx                  (entry point)

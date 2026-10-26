@@ -36,19 +36,19 @@
 
 ---
 
-### Clase 3: Clerk Autenticación Real
+### Clase 3: Autenticación simulada (Clerk planeado, no implementado)
 
 **Skill:** Autenticación ≠ Autorización  
 
-**Dónde:** `src/pages/LoginPage.tsx` + stores  
+**Dónde:** `src/pages/LoginPage.tsx` + `src/store/authStore.tsx`  
 
 **Evidencia:**
 
-- Clerk real (no mock, verdadera validación)
+- Autenticación simulada (demo): `login()` ignora la contraseña y acepta cualquier valor
 
-- JWT en localStorage
+- Estado de sesión persistido en localStorage (sin JWT ni validación real)
 
-- Diferente de mock data (que es para demo)
+- Clerk estaba planeado pero no está implementado (sin dependencia ni integración)
 
 ---
 
@@ -72,7 +72,7 @@ Problema → Solución → Impacto
 
 **Skill 1 - Logging explícito:**  
 
-`Logger.info()` + `Logger.error()` en CADA función de store  
+`Logger.info()` + `Logger.error()` en CADA función de store (`src/store/*.tsx`)  
 
 **NO:** Errores silenciosos  
 
@@ -108,12 +108,12 @@ Valida: estructura, campos requeridos
 |-------|-------|-----------|---------|
 | 1 | JTBD | 5 jobs identificados | JTBD_ANALYSIS.md |
 | 2 | Arquitectura aislada | 4 stores + 10 componentes | src/store/, src/components/ |
-| 3 | Clerk real | LoginPage + JWT | src/pages/LoginPage.tsx |
+| 3 | Auth simulada (Clerk planeado, no implementado) | LoginPage + authStore (localStorage) | src/pages/LoginPage.tsx |
 | 4 | Repomix | Código documentado | CODE_SNAPSHOT.md |
 | 4 | Firecrawl | Prompts optimizados | Estructura proyecto |
 | 4 | Demo ejecutiva | 5 min: problema→solución | Presentación |
-| 5 | Logging | Logger.info/error | src/store/*.ts |
-| 5 | Error handling | Try/catch explícito | src/store/*.ts |
+| 5 | Logging | Logger.info/error | src/store/*.tsx |
+| 5 | Error handling | Try/catch explícito | src/store/*.tsx |
 | 5 | .env | .env.example + .env.local | .env.example |
 | 5 | Tests | 6 tests pasando | **tests**/mockData.test.ts |
 
