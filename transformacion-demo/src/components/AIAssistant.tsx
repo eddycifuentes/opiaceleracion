@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { MessageCircle, Send, X } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { Logger } from '../utils/logger';
 
 interface Message {
@@ -15,7 +16,7 @@ export default function AIAssistant() {
     {
       id: '0',
       role: 'assistant',
-      content: 'Hola 👋 Soy tu asistente IA. Puedo ayudarte con información sobre iniciativas, tareas y sprints. ¿Qué necesitas?',
+      content: 'Hola 👋 Soy Dominique, tu asistente de Innovación. Puedo ayudarte con información sobre iniciativas, tareas y sprints. Cuéntame, ¿en qué te puedo colaborar',
       timestamp: new Date()
     }
   ]);
@@ -106,8 +107,8 @@ export default function AIAssistant() {
         <div className="bg-white rounded-lg shadow-2xl w-96 h-[500px] flex flex-col">
           <div className="bg-blue-600 text-white p-4 rounded-t-lg flex justify-between items-center">
             <div>
-              <h3 className="font-bold">Asistente IA 🤖</h3>
-              <p className="text-sm text-blue-100">Gemini + OPI Data</p>
+              <h3 className="font-bold">Dominique</h3>
+              <p className="text-sm text-blue-100">Agente IA - VP Innovación</p>
             </div>
             <button onClick={() => setIsOpen(false)} className="hover:bg-blue-700 p-1 rounded">
               <X size={20} />
@@ -117,8 +118,23 @@ export default function AIAssistant() {
           <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
             {messages.map(msg => (
               <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-xs px-4 py-2 rounded-lg ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-gray-200 text-gray-900 rounded-bl-none'}`}>
-                  <p className="text-sm">{msg.content}</p>
+                <div className={`px-4 py-2 rounded-lg ${msg.role === 'user' ? 'max-w-xs bg-blue-600 text-white rounded-br-none' : 'max-w-[85%] bg-gray-200 text-gray-900 rounded-bl-none'}`}>
+                  {msg.role === 'assistant' ? (
+                    <div className="text-sm">
+                      <ReactMarkdown
+                        components={{
+                          p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                          ul: ({ children }) => <ul className="list-disc pl-5 mb-2 space-y-1">{children}</ul>,
+                          ol: ({ children }) => <ol className="list-decimal pl-5 mb-2 space-y-1">{children}</ol>,
+                          h3: ({ children }) => <h3 className="font-bold mt-2 mb-1">{children}</h3>,
+                        }}
+                      >
+                        {msg.content}
+                      </ReactMarkdown>
+                    </div>
+                  ) : (
+                    <p className="text-sm">{msg.content}</p>
+                  )}
                   <span className="text-xs opacity-70">{msg.timestamp.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</span>
                 </div>
               </div>

@@ -157,6 +157,8 @@ function executeTool(toolName) {
         tareasPendientes: mockData.tareas.filter(t => t.estado === 'Pendiente').length,
         tareasEnProceso: mockData.tareas.filter(t => t.estado === 'En Proceso').length,
         tareasCompletadas: mockData.tareas.filter(t => t.estado === 'Completada').length,
+        tareasAltaPrioridad: mockData.tareas.filter(t => t.prioridad === 'Alta').length,
+        iniciativasActivas: mockData.iniciativas.filter(i => i.estado === 'Activo').length,
         sprintsEnCurso: mockData.sprints.filter(s => s.estado === 'En Curso').length
       };
     default:
@@ -193,41 +195,69 @@ app.post('/api/chat', async (req, res) => {
     const systemPrompt = `Eres un asistente inteligente para OPI Aceleración.
 Respondes preguntas sobre iniciativas, tareas, sprints y estadísticas.
 Usa las tools disponibles para acceder a datos reales.
+- Usa listas con viñetas, una idea por línea.
+- Pon en negrita solo el nombre de cada elemento.
+- No uses títulos con ### ni líneas separadoras ---.
+- No incluyas correos electrónicos.
+- Si hay más de 8 elementos, indica el total y muestra solo los primeros 5.
+Para conteos usa siempre los campos de getEstadisticas cuando existan. No inventes datos. Si una pregunta no es sobre iniciativas, tareas o sprints, dilo amablemente.
 Responde en ESPAÑOL, de forma clara y profesional.`;
 
     let textResponse = "";
     let toolsUsed = [];
 
-    // Primera llamada a Gemini con rol explícito de usuario.
-    const result1 = await model.generateContent({
-      contents: [{ role: "user", parts: [{ text: message }] }]
-    });
+    // Historial de la conversación con roles explícitos. Se va ampliando
+    // en cada vuelta: user -> model(functionCall) -> user(functionResponse)...
+    const contents = [{ role: "user", parts: [{ text: message }] }];
 
-    const parts1 = result1.response.candidates?.[0]?.content?.parts || [];
-    const call = parts1.find(p => p.functionCall);
+    // Bucle de tool-calling: Gemini puede necesitar varias llamadas a
+    // herramientas antes de producir el texto final. Máximo 5 vueltas para
+    // evitar bucles infinitos.
+    let ultimoCandidate = null;
+    for (let vuelta = 0; vuelta < 5; vuelta++) {
+      const result = await model.generateContent({ contents });
+      const candidate = result.response.candidates?.[0];
+      ultimoCandidate = candidate;
+      const parts = candidate?.content?.parts || [];
 
-    if (call) {
-      // Hay una llamada a función: ejecutar la tool correspondiente.
-      const toolName = call.functionCall.name;
-      const toolResult = executeTool(toolName);
-      toolsUsed.push({ tool: toolName, result: toolResult });
+      // Filtrar TODAS las partes que contienen una llamada a función.
+      const functionCalls = parts.filter(p => p.functionCall);
 
-      console.log(`[Tool] Ejecutada: ${toolName}`);
+      if (functionCalls.length === 0) {
+        // No hay llamadas a función: la respuesta final es el texto.
+        // Se extrae de las partes (no con response.text()) para no lanzar
+        // excepción cuando no hay texto.
+        textResponse = parts
+          .filter(p => typeof p.text === 'string')
+          .map(p => p.text)
+          .join('\n');
+        break;
+      }
 
-      // Segunda llamada reconstruyendo el historial con roles explícitos:
-      // user (mensaje) -> model (functionCall) -> user (functionResponse).
-      const result2 = await model.generateContent({
-        contents: [
-          { role: "user", parts: [{ text: message }] },
-          { role: "model", parts: parts1 },
-          { role: "user", parts: [{ functionResponse: { name: call.functionCall.name, response: toolResult } }] }
-        ]
-      });
+      // Conservar las partes del modelo tal cual (incluye thoughtSignature,
+      // que es obligatorio para que Gemini continúe la conversación).
+      contents.push({ role: "model", parts });
 
-      textResponse = result2.response.text();
-    } else {
-      // No hay llamada a función: usar la respuesta de texto directa.
-      textResponse = result1.response.text();
+      // Ejecutar cada tool solicitada y preparar un functionResponse por cada
+      // llamada, todas dentro del mismo turno de rol "user".
+      const responseParts = [];
+      for (const fc of functionCalls) {
+        const toolName = fc.functionCall.name;
+        const toolResult = executeTool(toolName);
+        toolsUsed.push({ tool: toolName, result: toolResult });
+        console.log(`[Tool] Ejecutada: ${toolName}`);
+        responseParts.push({
+          functionResponse: { name: toolName, response: toolResult }
+        });
+      }
+
+      contents.push({ role: "user", parts: responseParts });
+    }
+
+    if (!textResponse) {
+      // Tras agotar las vueltas sin texto, registrar el motivo de finalización
+      // del último candidate para diagnóstico y usar el mensaje de fallback.
+      console.warn('[Chat] Sin texto tras 5 vueltas. finishReason:', ultimoCandidate?.finishReason);
     }
 
     res.json({

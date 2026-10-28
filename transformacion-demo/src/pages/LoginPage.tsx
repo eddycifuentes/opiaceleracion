@@ -67,16 +67,6 @@ export const LoginPage: React.FC = () => {
             Ingresar
           </Button>
         </form>
-
-        <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-          <p className="text-sm text-blue-900 font-medium mb-2">Demo Credentials:</p>
-          <p className="text-xs text-blue-800">
-            Email: <span className="font-mono">eddy.cifuentes@segurosbolivar.com</span>
-          </p>
-          <p className="text-xs text-blue-800">
-            Password: <span className="font-mono">password</span>
-          </p>
-        </div>
       </div>
     </div>
   );
